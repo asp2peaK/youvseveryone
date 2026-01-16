@@ -90,26 +90,6 @@
   };
 
   // -----------------------------
-  // Supabase (Auth + DB)
-  // -----------------------------
-  // NOTE: Publishable keys are safe in-browser only with RLS enabled.
-  const SUPABASE_URL = "https://caehrwokvrdjlojnwnfzb.supabase.co";
-  const SUPABASE_KEY = "sb_publishable_tl7q_CylF_YFH0Vu0D-2qg_flzagSsL";
-  const supabase = (window.supabase && window.supabase.createClient)
-    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
-    : null;
-
-  function loadJSON(key, fallback) {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : fallback;
-    } catch { return fallback; }
-  }
-  function saveJSON(key, val) {
-    localStorage.setItem(key, JSON.stringify(val));
-  }
-
-  // -----------------------------
   // DOM helpers
   // -----------------------------
   const $ = (sel) => document.querySelector(sel);
