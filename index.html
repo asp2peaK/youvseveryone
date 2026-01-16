@@ -1,0 +1,481 @@
+<!-- index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>You vs Everyone</title>
+  <meta name="description" content="A viral, gamified daily hub: 24h Challenge, Procrastination Boss Fight, Focus Arena." />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg-orb orb-a" aria-hidden="true"></div>
+  <div class="bg-orb orb-b" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand" role="button" tabindex="0" id="goHome" aria-label="Go to home">
+      <span class="brand-mark" aria-hidden="true">◼</span>
+      <span class="brand-text">You vs Everyone</span>
+    </div>
+
+    <div class="topbar-actions">
+      <div class="pill subtle" id="statusPill" title="Today status">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Loading…</span>
+      </div>
+
+      <button class="pill" id="themeToggle" type="button" aria-label="Toggle theme">
+        <span class="icon" aria-hidden="true">☾</span>
+        <span class="label">Theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <!-- GATE (first visit) -->
+    <section class="screen active" id="screenGate" aria-labelledby="gateTitle">
+      <div class="gate">
+        <div class="card gate-card">
+          <div class="gate-kicker">Entry</div>
+          <h1 id="gateTitle" class="gate-title">You vs Everyone</h1>
+          <p class="gate-sub">No tracking. No spam. Pick how you want to start.</p>
+
+          <div class="gate-actions">
+            <button class="btn primary" type="button" id="gateAnonBtn">Continue anonymously</button>
+            <button class="btn" type="button" id="gateRegBtn">Create account</button>
+          </div>
+
+          <div class="gate-foot">
+            <span class="muted">Anonymous progress stays on this device.</span>
+            <span class="muted">Accounts sync later.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOME / HUB -->
+    <section class="screen" id="screenHome" aria-labelledby="homeTitle">
+      <div class="hero">
+        <div class="hero-left">
+          <h1 id="homeTitle" class="hero-title">You vs Everyone</h1>
+          <p class="hero-subtitle">Today’s challenge is live. No excuses.</p>
+
+          <div class="hero-metrics">
+            <div class="card metric">
+              <div class="metric-top">
+                <div class="metric-label">Streak</div>
+                <div class="metric-big" id="streakBig">0</div>
+              </div>
+              <div class="metric-sub" id="streakSub">Win once a day. Or don’t.</div>
+            </div>
+
+            <div class="card metric">
+              <div class="metric-top">
+                <div class="metric-label">Today</div>
+                <div class="metric-big" id="todayStatusBig">Not started</div>
+              </div>
+              <div class="metric-sub" id="todayStatusSub">Pick a mode. Press “Join / Start”.</div>
+            </div>
+          </div>
+
+          <div class="disclaimer">
+            Crowd count is simulated on-device. No tracking, no accounts, no data sent anywhere.
+          </div>
+        </div>
+
+        <div class="hero-right">
+          <div class="crowd-card card">
+            <div class="crowd-top">
+              <div class="crowd-title">Everyone is in today</div>
+              <div class="crowd-number" id="crowdNumber">—</div>
+            </div>
+            <div class="crowd-viz">
+              <canvas id="crowdCanvas" width="520" height="260" aria-label="Simulated crowd visualization"></canvas>
+            </div>
+            <div class="crowd-foot">
+              <span class="muted">Simulated • stable for your day</span>
+              <span class="muted">Zero backend</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modes">
+        <div class="modes-head">
+          <h2 class="section-title">Choose your mode</h2>
+          <p class="section-sub">Select a mode, then press <b>Join / Start</b>. No auto-start. No accidents.</p>
+        </div>
+
+        <div class="mode-grid">
+          <article class="card mode active" data-mode="challenge24">
+            <div class="mode-badge">Active</div>
+            <h3 class="mode-title">24h Challenge</h3>
+            <p class="mode-desc">A shared daily run. Same challenge for everyone. One honest button.</p>
+            <div class="mode-foot">
+              <div class="mode-mini" id="miniChallengeName">Today: …</div>
+              <button class="btn primary" type="button" data-action="enterMode" data-mode="challenge24">Join / Start</button>
+            </div>
+          </article>
+
+          <article class="card mode active" data-mode="bossFight">
+            <div class="mode-badge">Active</div>
+            <h3 class="mode-title">Procrastination Boss Fight</h3>
+            <p class="mode-desc">Pick a task. Pick a timer. The boss has your time as HP.</p>
+            <div class="mode-foot">
+              <div class="mode-mini">Tab-leave rule: boss heals.</div>
+              <button class="btn primary" type="button" data-action="enterMode" data-mode="bossFight">Join / Start</button>
+            </div>
+          </article>
+
+          <article class="card mode active" data-mode="focusArena">
+            <div class="mode-badge">Active</div>
+            <h3 class="mode-title">Focus Arena</h3>
+            <p class="mode-desc">Silent co-working pressure. No chat. Just the arena and the clock.</p>
+            <div class="mode-foot">
+              <div class="mode-mini">Tab-leave rule: fail.</div>
+              <button class="btn primary" type="button" data-action="enterMode" data-mode="focusArena">Join / Start</button>
+            </div>
+          </article>
+
+          <article class="card mode disabled" aria-disabled="true">
+            <div class="mode-badge ghost">Coming Soon</div>
+            <h3 class="mode-title">Achievements</h3>
+            <p class="mode-desc">Badges, milestones, and shame-proof stats.</p>
+            <div class="mode-foot">
+              <div class="mode-mini">Teaser: XP bar + streak shields.</div>
+              <button class="btn" type="button" disabled>Coming Soon</button>
+            </div>
+          </article>
+
+          <article class="card mode disabled" aria-disabled="true">
+            <div class="mode-badge ghost">Coming Soon</div>
+            <h3 class="mode-title">Rewards</h3>
+            <p class="mode-desc">Tiny cosmetics. Big ego. Zero paywalls.</p>
+            <div class="mode-foot">
+              <div class="mode-mini">Teaser: “Proof Cards” gallery.</div>
+              <button class="btn" type="button" disabled>Coming Soon</button>
+            </div>
+          </article>
+
+          <article class="card mode disabled" aria-disabled="true">
+            <div class="mode-badge ghost">Coming Soon</div>
+            <h3 class="mode-title">Teams</h3>
+            <p class="mode-desc">No chat. Just rival banners. Social pressure, politely.</p>
+            <div class="mode-foot">
+              <div class="mode-mini">Teaser: “You vs Friends vs Everyone”.</div>
+              <button class="btn" type="button" disabled>Coming Soon</button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- MODE: 24H CHALLENGE -->
+    <section class="screen" id="screenChallenge24" aria-labelledby="challengeTitle">
+      <div class="screen-head">
+        <button class="btn ghost" type="button" data-action="backHome">← Back</button>
+        <div class="screen-head-center">
+          <div class="screen-kicker">Mode</div>
+          <h2 class="screen-title">24h Challenge</h2>
+        </div>
+        <div class="screen-head-right">
+          <div class="pill subtle">
+            <span class="muted">Resets in</span>
+            <span class="mono" id="resetCountdown">—</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="card panel">
+          <div class="panel-top">
+            <div class="panel-label">Today’s run</div>
+            <div class="panel-title" id="challengeTitle">—</div>
+            <div class="panel-desc" id="challengeDesc">—</div>
+          </div>
+
+          <div class="panel-actions">
+            <button class="btn primary" type="button" id="joinChallengeBtn">Join Challenge</button>
+            <button class="btn" type="button" id="completeChallengeBtn" disabled>I completed it</button>
+            <button class="btn danger" type="button" id="failChallengeBtn" disabled>I failed</button>
+          </div>
+
+          <div class="panel-foot">
+            <div class="hint">
+              Rule: leave this tab for <b>15+ seconds</b> → <b>fail</b>. (Warning shown before start.)
+            </div>
+          </div>
+        </div>
+
+        <div class="card panel">
+          <div class="panel-top">
+            <div class="panel-label">Today status</div>
+            <div class="status-big" id="challengeStatusBig">Not started</div>
+            <div class="status-sub" id="challengeStatusSub">Press “Join Challenge” to begin.</div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="panel-top">
+            <div class="panel-label">Proof card</div>
+            <div class="share-card" id="challengeShareCard">
+              <div class="share-top">
+                <div class="share-title">You vs Everyone</div>
+                <div class="share-date mono" id="shareDate1">—</div>
+              </div>
+              <div class="share-body">
+                <div class="share-line"><span class="muted">Challenge</span> <b id="shareChallengeName">—</b></div>
+                <div class="share-line"><span class="muted">Result</span> <b id="shareResult1">—</b></div>
+                <div class="share-line"><span class="muted">Streak</span> <b id="shareStreak1">0</b></div>
+              </div>
+            </div>
+
+            <div class="panel-actions">
+              <button class="btn" type="button" id="copyShare1" disabled>Copy to clipboard</button>
+              <button class="btn" type="button" id="downloadShare1" disabled>Download result image</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MODE: BOSS FIGHT -->
+    <section class="screen" id="screenBossFight" aria-labelledby="bossTitle">
+      <div class="screen-head">
+        <button class="btn ghost" type="button" data-action="backHome">← Back</button>
+        <div class="screen-head-center">
+          <div class="screen-kicker">Mode</div>
+          <h2 class="screen-title">Procrastination Boss Fight</h2>
+        </div>
+        <div class="screen-head-right">
+          <div class="pill subtle">
+            <span class="muted">Rule</span>
+            <span class="mono">Leave 15s → boss heals</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="card panel">
+          <div class="panel-top">
+            <div class="panel-label">Setup</div>
+            <label class="field">
+              <span class="field-label">Task name</span>
+              <input class="input" id="bossTask" maxlength="60" placeholder="e.g., Finish slides, write report, clean inbox" />
+            </label>
+
+            <div class="field">
+              <div class="field-label">Duration</div>
+              <div class="seg">
+                <button class="seg-btn" type="button" data-min="10">10m</button>
+                <button class="seg-btn" type="button" data-min="15">15m</button>
+                <button class="seg-btn active" type="button" data-min="25">25m</button>
+                <button class="seg-btn" type="button" data-min="45">45m</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-actions">
+            <button class="btn primary" type="button" id="startBossBtn">Start Fight</button>
+            <button class="btn" type="button" id="stopBossBtn" disabled>Stop</button>
+          </div>
+
+          <div class="panel-foot">
+            <div class="hint">
+              If you leave the tab for 15+ seconds, the boss heals <b>+20% HP</b>. (Warning shown before start.)
+            </div>
+          </div>
+        </div>
+
+        <div class="card panel boss-stage">
+          <div class="boss-top">
+            <div>
+              <div class="panel-label">Boss</div>
+              <div class="boss-name" id="bossTitle">The Procrastination</div>
+            </div>
+            <div class="mono boss-timer" id="bossTimer">25:00</div>
+          </div>
+
+          <div class="hp">
+            <div class="hp-bar">
+              <div class="hp-fill" id="bossHpFill" style="width:100%"></div>
+              <div class="hp-glow" id="bossHpGlow" aria-hidden="true"></div>
+            </div>
+            <div class="hp-meta">
+              <span class="muted">HP</span>
+              <span class="mono" id="bossHpText">100%</span>
+            </div>
+          </div>
+
+          <div class="boss-visual" aria-hidden="true">
+            <div class="boss-body" id="bossBody">
+              <div class="boss-eye eye-a"></div>
+              <div class="boss-eye eye-b"></div>
+              <div class="boss-mouth"></div>
+            </div>
+            <div class="slash" id="bossSlash"></div>
+            <div class="heal" id="bossHeal"></div>
+          </div>
+
+          <div class="boss-foot">
+            <div class="muted" id="bossState">Idle. Name your task and start.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="card panel">
+          <div class="panel-top">
+            <div class="panel-label">Proof card</div>
+            <div class="share-card" id="bossShareCard">
+              <div class="share-top">
+                <div class="share-title">You vs Everyone</div>
+                <div class="share-date mono" id="shareDate2">—</div>
+              </div>
+              <div class="share-body">
+                <div class="share-line"><span class="muted">Boss</span> <b>Defeated</b></div>
+                <div class="share-line"><span class="muted">Task</span> <b id="shareBossTask">—</b></div>
+                <div class="share-line"><span class="muted">Duration</span> <b id="shareBossDur">—</b></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-actions">
+            <button class="btn" type="button" id="copyShare2" disabled>Copy to clipboard</button>
+            <button class="btn" type="button" id="downloadShare2" disabled>Download result image</button>
+          </div>
+        </div>
+
+        <div class="card panel">
+          <div class="panel-top">
+            <div class="panel-label">History (local)</div>
+            <div class="history" id="bossHistory">
+              <div class="muted">No fights recorded yet.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MODE: FOCUS ARENA -->
+    <section class="screen" id="screenFocusArena" aria-labelledby="arenaTitle">
+      <div class="screen-head">
+        <button class="btn ghost" type="button" data-action="backHome">← Back</button>
+        <div class="screen-head-center">
+          <div class="screen-kicker">Mode</div>
+          <h2 class="screen-title">Focus Arena</h2>
+        </div>
+        <div class="screen-head-right">
+          <div class="pill subtle">
+            <span class="muted">Simulated</span>
+            <span class="mono" id="arenaPeople">—</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="card panel">
+          <div class="panel-top">
+            <div class="panel-label">Pick a session</div>
+            <div class="seg">
+              <button class="seg-btn" type="button" data-focus-min="10">10m</button>
+              <button class="seg-btn active" type="button" data-focus-min="25">25m</button>
+              <button class="seg-btn" type="button" data-focus-min="50">50m</button>
+            </div>
+
+            <div class="arena-note">
+              Leave the tab for <b>15+ seconds</b> → <b>fail</b>. No drama, just math.
+            </div>
+          </div>
+
+          <div class="panel-actions">
+            <button class="btn primary" type="button" id="startArenaBtn">Enter Arena</button>
+            <button class="btn" type="button" id="stopArenaBtn" disabled>Stop</button>
+          </div>
+
+          <div class="panel-foot">
+            <div class="hint">Silent pressure. No chat. No accounts. Only time.</div>
+          </div>
+        </div>
+
+        <div class="card panel arena-stage">
+          <div class="arena-top">
+            <div>
+              <div class="panel-label">Arena</div>
+              <div class="arena-title" id="arenaTitle">Focus</div>
+            </div>
+            <div class="mono arena-timer" id="arenaTimer">25:00</div>
+          </div>
+
+          <div class="arena-viz">
+            <canvas id="arenaCanvas" width="520" height="260" aria-label="Focus arena visualization"></canvas>
+          </div>
+
+          <div class="arena-foot">
+            <div class="muted" id="arenaState">Idle. Press “Enter Arena”.</div>
+            <div class="badge-progress" id="badgeProgress">
+              <div class="badge-row">
+                <span class="muted">Badges</span>
+                <span class="mono" id="badgeText">0 / 3</span>
+              </div>
+              <div class="mini-bar">
+                <div class="mini-fill" id="badgeFill" style="width:0%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="card panel">
+          <div class="panel-top">
+            <div class="panel-label">Proof card</div>
+            <div class="share-card" id="arenaShareCard">
+              <div class="share-top">
+                <div class="share-title">You vs Everyone</div>
+                <div class="share-date mono" id="shareDate3">—</div>
+              </div>
+              <div class="share-body">
+                <div class="share-line"><span class="muted">Arena</span> <b id="shareArenaResult">—</b></div>
+                <div class="share-line"><span class="muted">Session</span> <b id="shareArenaDur">—</b></div>
+                <div class="share-line"><span class="muted">Badges</span> <b id="shareArenaBadges">—</b></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-actions">
+            <button class="btn" type="button" id="copyShare3" disabled>Copy to clipboard</button>
+            <button class="btn" type="button" id="downloadShare3" disabled>Download result image</button>
+          </div>
+        </div>
+
+        <div class="card panel">
+          <div class="panel-top">
+            <div class="panel-label">History (local)</div>
+            <div class="history" id="arenaHistory">
+              <div class="muted">No arena sessions recorded yet.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL -->
+  <div class="modal-backdrop" id="modalBackdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-top">
+        <div class="modal-title" id="modalTitle">Heads up</div>
+        <button class="icon-btn" type="button" id="modalClose" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody">—</div>
+      <div class="modal-actions" id="modalActions"></div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div class="toast-wrap" aria-live="polite" aria-atomic="true" id="toastWrap"></div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
