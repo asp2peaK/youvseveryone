@@ -245,7 +245,14 @@
   // Supabase (Auth + DB)
   // -----------------------------
   // Put YOUR keys here (publishable/anon is OK for browser with RLS).
-  const SUPABASE_URL = "https://caehrwokvrdjlojnwnfzb.supabase.co";
+  // -----------------------------
+  // Supabase (Auth + DB)
+  // -----------------------------
+  
+  // 1. ИСПРАВЛЕННЫЙ URL (убрали лишнюю букву 'r')
+  const SUPABASE_URL = "https://caehrwokvdjlojnwnfzb.supabase.co";
+  
+  // 2. Твой ключ (Publishable)
   const SUPABASE_KEY = "sb_publishable_tl7q_CylF_YFH0Vu0D-2qg_flzagSsL";
 
   let supabase = null;
@@ -257,7 +264,17 @@
       console.warn("Supabase JS not found. Auth will be unavailable.");
       return;
     }
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    
+    // 3. ДОБАВЛЕНЫ НАСТРОЙКИ (чтобы не было ошибки Tracking Prevention)
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storageKey: 'yve_auth_token',
+        storage: window.localStorage // Явно используем локальное хранилище
+      }
+    });
   }
 
   async function refreshAuthUser() {
@@ -271,6 +288,7 @@
   function getUserMode() {
     return localStorage.getItem(LS.userMode); // 'anon' | 'auth' | null
   }
+  
   function setUserMode(mode) {
     localStorage.setItem(LS.userMode, mode);
   }
