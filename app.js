@@ -90,6 +90,27 @@
   };
 
   // -----------------------------
+// Storage helpers (FIX)
+// -----------------------------
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function saveJSON(key, val) {
+  try {
+    localStorage.setItem(key, JSON.stringify(val));
+  } catch (e) {
+    console.warn("saveJSON failed", e);
+  }
+}
+
+
+  // -----------------------------
   // DOM helpers
   // -----------------------------
   const $ = (sel) => document.querySelector(sel);
