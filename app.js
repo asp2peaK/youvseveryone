@@ -381,7 +381,7 @@ function saveJSON(key, val) {
     // Try to fetch profile; if missing -> force onboarding modal.
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, display_name, color_hex")
+      .select("id, display_name, circle_style")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -461,7 +461,7 @@ function saveJSON(key, val) {
       if (!name) return setProfileError("Pick a display name.");
       setProfileError("");
 
-      const payload = { id: user.id, display_name: name, color_hex: chosen };
+      const payload = { id: user.id, display_name: name, circle_style: { type: "solid", color: chosen } };
       const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
       if (error) {
         // Common case: unique violation on display_name
