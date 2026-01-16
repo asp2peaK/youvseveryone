@@ -475,6 +475,27 @@ function saveJSON(key, val) {
     }
   }
 
+  async function ensureEntryGate() {
+  const mode = getUserMode(); // 'anon' | 'auth' | null
+
+  // If user already chose anonymous, continue.
+  if (mode === "anon") return;
+
+  // If user chose auth, but session exists, continue; otherwise show gate.
+  if (mode === "auth") {
+    const u = await getSupabaseUser();
+    if (u) {
+      // If logged in, ensure profile then continue
+      await ensureProfileOrOnboard(u);
+      return;
+    }
+  }
+
+  // No choice yet or auth missing -> force gate modal
+  openEntryGateModal();
+}
+
+  
   // -----------------------------
   // Challenge list (daily shared)
   // -----------------------------
