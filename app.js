@@ -1,13 +1,19 @@
 /* app.js */
 /**
- * You vs Everyone (single-page, localStorage-only)
+ * You vs Everyone (single-page)
+ *
+ * Local:
  * - Theme toggle (persisted)
  * - Hub + 3 active modes
- * - Deterministic daily seed for challenge + crowd number
+ * - Deterministic daily seed (UTC day)
  * - Anti-cheat / focus rule (15s away) via Page Visibility API
  * - Share text + copy + downloadable image via Canvas
  *
- * No tracking. No network. Everything stays in localStorage.
+ * Supabase (Auth mode):
+ * - profiles: display_name + circle_style
+ * - daily_runs: 24h challenge
+ * - sessions: bossFight / focusArena
+ * - presence: lightweight mode + last_seen
  */
 
 (function () {
@@ -19,9 +25,9 @@
   const pad2 = (n) => String(n).padStart(2, "0");
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
-  function localDayKey(d = new Date()) {
-    // Stable per local date: YYYY-MM-DD
-    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  // UTC day key: stable for everyone
+  function utcDayKey(d = new Date()) {
+    return d.toISOString().slice(0, 10); // YYYY-MM-DD
   }
 
   function minutesToMs(m) { return m * 60 * 1000; }
@@ -40,6 +46,14 @@
     const mm = Math.floor((s % 3600) / 60);
     const ss = s % 60;
     return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
+  }
+
+  function nextUtcMidnight(d = new Date()) {
+    const n = new Date(d);
+    // Next 00:00:00Z
+    n.setUTCDate(n.getUTCDate() + 1);
+    n.setUTCHours(0, 0, 0, 0);
+    return n;
   }
 
   // Deterministic hash -> uint32
@@ -65,14 +79,8 @@
   }
 
   function todaySeed(salt = "") {
-    const key = localDayKey();
+    const key = utcDayKey();
     return hash32(`yve:${key}:${salt}`);
-  }
-
-  function nextLocalMidnight(d = new Date()) {
-    const n = new Date(d);
-    n.setHours(24, 0, 0, 0);
-    return n;
   }
 
   // -----------------------------
@@ -82,33 +90,29 @@
     theme: "yve_theme",
     userMode: "yve_user_mode", // 'anon' | 'auth'
     streak: "yve_streak",
-    lastStreakDay: "yve_streak_last_day",
-    todayState: "yve_today_state", // for 24h challenge: {dayKey, state, startedAt, awayAccum, resultAt, challengeId, shareLast}
+    lastStreakDay: "yve_streak_last_day", // UTC day
+    todayState: "yve_today_state", // 24h challenge (UTC): {dayKey, state, startedAt, resultAt, challengeId}
     bossHistory: "yve_boss_history",
     arenaHistory: "yve_arena_history",
     arenaBadges: "yve_arena_badges" // integer
   };
 
-  // -----------------------------
-// Storage helpers (FIX)
-// -----------------------------
-function loadJSON(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch (e) {
-    return fallback;
+  function loadJSON(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch {
+      return fallback;
+    }
   }
-}
 
-function saveJSON(key, val) {
-  try {
-    localStorage.setItem(key, JSON.stringify(val));
-  } catch (e) {
-    console.warn("saveJSON failed", e);
+  function saveJSON(key, val) {
+    try {
+      localStorage.setItem(key, JSON.stringify(val));
+    } catch (e) {
+      console.warn("saveJSON failed", e);
+    }
   }
-}
-
 
   // -----------------------------
   // DOM helpers
@@ -118,9 +122,36 @@ function saveJSON(key, val) {
 
   function showScreen(id) {
     $$(".screen").forEach(s => s.classList.remove("active"));
-    $(id).classList.add("active");
-    // minor scroll-to-top for mobile comfort
+    const el = $(id);
+    if (el) el.classList.add("active");
     window.scrollTo({ top: 0, behavior: "smooth" });
+
+    // Presence: update mode when screen changes
+    if (id === "#screenHome") presenceSetMode("hub");
+    if (id === "#screenChallenge24") presenceSetMode("challenge24");
+    if (id === "#screenBossFight") presenceSetMode("bossFight");
+    if (id === "#screenFocusArena") presenceSetMode("focusArena");
+  }
+
+  // -----------------------------
+  // Escape helpers
+  // -----------------------------
+  function escapeHTML(str) {
+    return String(str)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function escapeAttr(str) {
+    return String(str)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
   }
 
   // -----------------------------
@@ -150,27 +181,23 @@ function saveJSON(key, val) {
   const modalActions = $("#modalActions");
   const modalClose = $("#modalClose");
 
-  // If true, modal cannot be dismissed via X / backdrop / ESC.
   let modalLocked = false;
 
   function openModal({ title, body, actions, locked = false }) {
     modalLocked = !!locked;
     modalTitle.textContent = title;
-    modalBody.innerHTML = body; // body is controlled content; keep simple
+    modalBody.innerHTML = body;
     modalActions.innerHTML = "";
-    actions.forEach(a => {
+    (actions || []).forEach(a => {
       const btn = document.createElement("button");
       btn.className = `btn ${a.variant || ""}`.trim();
       btn.type = "button";
       btn.textContent = a.label;
-      btn.addEventListener("click", () => {
-        if (a.onClick) a.onClick();
-      });
+      btn.addEventListener("click", () => a.onClick && a.onClick());
       modalActions.appendChild(btn);
     });
-    modalBackdrop.hidden = false;
 
-    // Hide the X button when modal is locked.
+    modalBackdrop.hidden = false;
     modalClose.style.display = modalLocked ? "none" : "";
   }
 
@@ -196,7 +223,7 @@ function saveJSON(key, val) {
   function applyTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
     const icon = $("#themeToggle .icon");
-    icon.textContent = theme === "light" ? "☀" : "☾";
+    if (icon) icon.textContent = theme === "light" ? "☀" : "☾";
   }
 
   function initTheme() {
@@ -217,13 +244,13 @@ function saveJSON(key, val) {
   // -----------------------------
   // Supabase (Auth + DB)
   // -----------------------------
-  // IMPORTANT:
-  // - Use ONLY publishable/anon keys in the browser.
-  // - RLS policies must protect your tables.
-  const SUPABASE_URL = "https://caehrwokvdjlojnwnfzb.supabase.co";
+  // Put YOUR keys here (publishable/anon is OK for browser with RLS).
+  const SUPABASE_URL = "https://caehrwokvrdjlojnwnfzb.supabase.co";
   const SUPABASE_KEY = "sb_publishable_tl7q_CylF_YFH0Vu0D-2qg_flzagSsL";
 
   let supabase = null;
+  let authUser = null;     // Supabase user
+  let authProfile = null;  // public.profiles row
 
   function initSupabase() {
     if (!window.supabase || !window.supabase.createClient) {
@@ -233,11 +260,12 @@ function saveJSON(key, val) {
     supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   }
 
-  async function getSupabaseUser() {
+  async function refreshAuthUser() {
     if (!supabase) return null;
     const { data, error } = await supabase.auth.getUser();
     if (error) return null;
-    return data.user || null;
+    authUser = data.user || null;
+    return authUser;
   }
 
   function getUserMode() {
@@ -247,15 +275,111 @@ function saveJSON(key, val) {
     localStorage.setItem(LS.userMode, mode);
   }
 
+  async function signOut() {
+    if (!supabase) return;
+    try { await supabase.auth.signOut(); } catch { /* ignore */ }
+    authUser = null;
+    authProfile = null;
+    setUserMode("anon");
+    updateAccountPill();
+  }
+
   // -----------------------------
-  // Entry gate + Auth modals (cannot be dismissed)
+  // DB helpers (Auth mode only)
+  // -----------------------------
+  function isAuthActive() {
+    return getUserMode() === "auth" && !!authUser;
+  }
+
+  async function dbUpsertDailyRun({ status, challengeId, startedAtISO, endedAtISO, failReason }) {
+    if (!isAuthActive() || !supabase) return;
+    const payload = {
+      user_id: authUser.id,
+      day_utc: utcDayKey(),
+      challenge_id: challengeId,
+      status,
+      started_at: startedAtISO || null,
+      ended_at: endedAtISO || null,
+      fail_reason: failReason || null
+    };
+
+    const { error } = await supabase
+      .from("daily_runs")
+      .upsert(payload, { onConflict: "user_id,day_utc" });
+
+    if (error) console.warn("daily_runs upsert failed", error);
+  }
+
+  async function dbInsertSession({ mode, taskName, durationMinutes, status, startedAtISO, endedAtISO }) {
+    if (!isAuthActive() || !supabase) return;
+    const payload = {
+      user_id: authUser.id,
+      mode,
+      task_name: taskName || null,
+      duration_minutes: durationMinutes,
+      status,
+      started_at: startedAtISO || new Date().toISOString(),
+      ended_at: endedAtISO || new Date().toISOString(),
+      day_utc: utcDayKey()
+    };
+
+    const { error } = await supabase.from("sessions").insert(payload);
+    if (error) console.warn("sessions insert failed", error);
+  }
+
+  // -----------------------------
+  // Presence (Auth mode only)
+  // -----------------------------
+  let presenceMode = "hub";
+  let presenceTimer = null;
+
+  function presenceSetMode(mode) {
+    presenceMode = mode;
+    presenceHeartbeat();
+  }
+
+  async function presenceHeartbeat() {
+    if (!isAuthActive() || !supabase) return;
+
+    const displayName = authProfile?.display_name || null;
+    const circleStyle = authProfile?.circle_style || null;
+
+    const payload = {
+      user_id: authUser.id,
+      mode: presenceMode,
+      day_utc: utcDayKey(),
+      last_seen_at: new Date().toISOString(),
+      display_name_snapshot: displayName,
+      circle_style_snapshot: circleStyle
+    };
+
+    const { error } = await supabase
+      .from("presence")
+      .upsert(payload, { onConflict: "user_id" });
+
+    if (error) console.warn("presence upsert failed", error);
+  }
+
+  function startPresenceLoop() {
+    if (presenceTimer) clearInterval(presenceTimer);
+    presenceTimer = setInterval(presenceHeartbeat, 30000);
+
+    window.addEventListener("beforeunload", () => {
+      // best-effort
+      presenceHeartbeat();
+    });
+  }
+
+  // -----------------------------
+  // Entry gate + Auth modals
   // -----------------------------
   function openEntryGateModal() {
     openModal({
       title: "Choose your entry",
       locked: true,
       body: `
-        <p><b>Pick a mode.</b> Anonymous stays local & simulated. Login enables real presence.</p>
+        <p><b>Pick a mode.</b> Anonymous is simulated + local. Login enables real presence + DB sync.</p>
+        <p class="muted" style="margin-top:10px">We don’t track you. If you log in, data is stored only in your Supabase project.</p>
       `,
       actions: [
         {
@@ -264,16 +388,14 @@ function saveJSON(key, val) {
           onClick: () => {
             setUserMode("anon");
             closeModalForce();
-            toast("Anonymous", "Simulated crowd. Nothing leaves your device.");
+            updateAccountPill();
             renderHub();
           }
         },
         {
           label: "Log in / Register",
           variant: "primary",
-          onClick: () => {
-            openAuthModal({ mode: "login" });
-          }
+          onClick: () => openAuthModal({ mode: "login" })
         }
       ]
     });
@@ -299,11 +421,7 @@ function saveJSON(key, val) {
         <div class="link-inline" id="authToggle">${isRegister ? "Already have an account? Log in" : "First time here? Register"}</div>
       `,
       actions: [
-        {
-          label: "Back",
-          variant: "ghost",
-          onClick: () => openEntryGateModal()
-        },
+        { label: "Back", variant: "ghost", onClick: () => openEntryGateModal() },
         {
           label: isRegister ? "Create account" : "Log in",
           variant: "primary",
@@ -312,17 +430,19 @@ function saveJSON(key, val) {
       ]
     });
 
-    // Wire toggle
-    const toggle = $("#authToggle");
-    toggle.addEventListener("click", () => {
+    $("#authToggle").addEventListener("click", () => {
       const email = ($("#authEmail").value || "").trim();
       openAuthModal({ mode: isRegister ? "login" : "register", presetEmail: email });
     });
 
-    // Enter to submit
     $("#authPass").addEventListener("keydown", (e) => {
       if (e.key === "Enter") (isRegister ? doRegister() : doLogin());
     });
+
+    function setAuthError(msg) {
+      const el = $("#authError");
+      if (el) el.textContent = msg;
+    }
 
     async function doRegister() {
       if (!supabase) return setAuthError("Supabase not loaded.");
@@ -331,26 +451,27 @@ function saveJSON(key, val) {
       if (!email || password.length < 6) return setAuthError("Enter a valid email and a 6+ char password.");
 
       setAuthError("");
+
+      // IMPORTANT: redirect back to your GitHub Pages URL
       const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: "https://asp2peak.github.io/youvseveryone/"
-      }
-    });
+        email,
+        password,
+        options: { emailRedirectTo: window.location.origin + window.location.pathname }
+      });
+
       if (error) return setAuthError(error.message);
 
-      // If email confirmations are enabled, session may be null.
+      // Email confirmation enabled => session may be null
       if (!data.session) {
         toast("Registered", "Check your email to confirm, then log in.");
         openAuthModal({ mode: "login", presetEmail: email });
         return;
       }
 
-      // Logged in immediately
       toast("Registered", "Account created. One more step.");
       setUserMode("auth");
-      await ensureProfileOrOnboard(data.user);
+      authUser = data.user;
+      await ensureProfileOrOnboard(authUser);
     }
 
     async function doLogin() {
@@ -365,29 +486,26 @@ function saveJSON(key, val) {
 
       toast("Logged in", "Presence can be real now.");
       setUserMode("auth");
-      closeModalForce();
-      await ensureProfileOrOnboard(data.user);
-    }
+      authUser = data.user;
 
-    function setAuthError(msg) {
-      const el = $("#authError");
-      if (el) el.textContent = msg;
+      // Close modal NOW so it never gets stuck behind profile onboarding.
+      closeModalForce();
+      await ensureProfileOrOnboard(authUser);
     }
   }
 
   async function ensureProfileOrOnboard(user) {
     if (!supabase || !user) return;
 
-    // Try to fetch profile; if missing -> force onboarding modal.
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, display_name, circle_style")
+      .select("id, display_name, circle_style, plan")
       .eq("id", user.id)
       .maybeSingle();
 
     if (error) {
-      toast("Profile", "Could not load profile. Check RLS/policies.");
       console.error(error);
+      toast("Profile", "Could not load profile. Check RLS/policies.");
       return;
     }
 
@@ -396,7 +514,13 @@ function saveJSON(key, val) {
       return;
     }
 
-    // Profile exists -> enter app
+    authProfile = data;
+    updateAccountPill();
+
+    // Start presence updates
+    presenceSetMode(presenceMode);
+    startPresenceLoop();
+
     closeModalForce();
     renderHub();
   }
@@ -408,24 +532,26 @@ function saveJSON(key, val) {
       "#ffb36b", "#6b8dff", "#c0c0c0", "#ffffff"
     ];
 
-    let chosen = COLORS[0];
+    const initialName = authProfile?.display_name || "";
+    const initialStyle = authProfile?.circle_style || { type: "solid", color: COLORS[0] };
+    let chosen = initialStyle?.color || COLORS[0];
 
     openModal({
-      title: "Finish setup",
+      title: "Profile",
       locked: true,
       body: `
-        <p><b>Choose a display name</b> and your circle color. (12 free colors for now.)</p>
+        <p><b>Display name</b> and circle color. (12 free colors for now.)</p>
 
         <div class="field">
           <span class="field-label">Display name</span>
-          <input class="input" id="profileName" maxlength="24" placeholder="e.g., Nadir" />
+          <input class="input" id="profileName" maxlength="24" placeholder="e.g., Nadir" value="${escapeAttr(initialName)}" />
         </div>
 
         <div class="field">
           <span class="field-label">Circle color</span>
           <div class="seg" id="colorSeg">
-            ${COLORS.map((c, i) => `
-              <button class="seg-btn ${i === 0 ? "active" : ""}" type="button" data-color="${c}" style="padding:10px 12px;">
+            ${COLORS.map((c) => `
+              <button class="seg-btn" type="button" data-color="${c}" style="padding:10px 12px;${c === chosen ? "border-color: var(--accent);" : ""}">
                 <span style="display:inline-block;width:14px;height:14px;border-radius:999px;background:${c};border:1px solid var(--border)"></span>
               </button>
             `).join("")}
@@ -443,12 +569,15 @@ function saveJSON(key, val) {
       ]
     });
 
-    // Color selection
+    // Activate selected
     $$("#colorSeg .seg-btn").forEach(btn => {
+      const c = btn.getAttribute("data-color");
+      if (c === chosen) btn.classList.add("active");
+
       btn.addEventListener("click", () => {
         $$("#colorSeg .seg-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
-        chosen = btn.getAttribute("data-color");
+        chosen = c;
       });
     });
 
@@ -456,53 +585,131 @@ function saveJSON(key, val) {
       if (e.key === "Enter") saveProfile();
     });
 
+    function setProfileError(msg) {
+      const el = $("#profileError");
+      if (el) el.textContent = msg;
+    }
+
     async function saveProfile() {
       const name = ($("#profileName").value || "").trim();
       if (!name) return setProfileError("Pick a display name.");
       setProfileError("");
 
-      const payload = { id: user.id, display_name: name, circle_style: { type: "solid", color: chosen } };
-      const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+      const circleStyle = { type: "solid", color: chosen };
+      const payload = { id: user.id, display_name: name, circle_style: circleStyle };
+
+      const { error } = await supabase
+        .from("profiles")
+        .upsert(payload, { onConflict: "id" });
+
       if (error) {
-        // Common case: unique violation on display_name
-        if (String(error.message || "").toLowerCase().includes("duplicate") || String(error.code) === "23505") {
+        // unique violation on display_name
+        if (String(error.code) === "23505" || String(error.message || "").toLowerCase().includes("duplicate")) {
           return setProfileError("This display name is taken. Try another.");
         }
         return setProfileError(error.message);
       }
 
-      toast("Welcome", "Profile saved.");
+      authProfile = { id: user.id, display_name: name, circle_style: circleStyle, plan: "free" };
+      updateAccountPill();
+      toast("Saved", "Profile updated.");
+
       closeModalForce();
       renderHub();
-    }
 
-    function setProfileError(msg) {
-      const el = $("#profileError");
-      if (el) el.textContent = msg;
+      // Also update presence snapshot
+      presenceHeartbeat();
     }
   }
 
   async function ensureEntryGate() {
-  const mode = getUserMode(); // 'anon' | 'auth' | null
+    const mode = getUserMode(); // 'anon' | 'auth' | null
 
-  // If user already chose anonymous, continue.
-  if (mode === "anon") return;
-
-  // If user chose auth, but session exists, continue; otherwise show gate.
-  if (mode === "auth") {
-    const u = await getSupabaseUser();
-    if (u) {
-      // If logged in, ensure profile then continue
-      await ensureProfileOrOnboard(u);
+    // Already chose anonymous
+    if (mode === "anon") {
+      updateAccountPill();
       return;
     }
+
+    // Auth mode: require valid session
+    if (mode === "auth") {
+      const u = await refreshAuthUser();
+      if (u) {
+        await ensureProfileOrOnboard(u);
+        return;
+      }
+    }
+
+    // No choice yet or auth missing
+    openEntryGateModal();
   }
 
-  // No choice yet or auth missing -> force gate modal
-  openEntryGateModal();
-}
+  // -----------------------------
+  // Account pill + menu
+  // -----------------------------
+  function getCircleColorFromProfile() {
+    const c = authProfile?.circle_style?.color;
+    return typeof c === "string" && c ? c : "var(--accent)";
+  }
 
-  
+  function updateAccountPill() {
+    const label = $("#accountName");
+    const dot = $("#accountDot");
+    if (!label || !dot) return;
+
+    const mode = getUserMode();
+    if (mode === "auth" && authUser) {
+      label.textContent = authProfile?.display_name || "Account";
+      dot.style.background = getCircleColorFromProfile();
+      dot.style.opacity = "1";
+      return;
+    }
+
+    label.textContent = "Anonymous";
+    dot.style.background = "var(--accent)";
+    dot.style.opacity = "0.7";
+  }
+
+  function openAccountMenu() {
+    const mode = getUserMode();
+
+    if (mode === "auth" && authUser) {
+      const name = authProfile?.display_name || "Account";
+      openModal({
+        title: name,
+        locked: false,
+        body: `
+          <p class="muted">Logged in. Your runs will be stored in your database.</p>
+        `,
+        actions: [
+          { label: "Profile", variant: "ghost", onClick: () => openProfileModal(authUser) },
+          {
+            label: "Log out",
+            variant: "ghost",
+            onClick: async () => {
+              closeModalForce();
+              await signOut();
+              openEntryGateModal();
+            }
+          },
+          { label: "Close", variant: "primary", onClick: () => closeModal() }
+        ]
+      });
+      return;
+    }
+
+    // Anonymous
+    openModal({
+      title: "Anonymous",
+      locked: false,
+      body: `<p class="muted">Simulated crowd. Everything stays on this device.</p>`,
+      actions: [
+        { label: "Log in / Register", variant: "primary", onClick: () => openAuthModal({ mode: "login" }) },
+        { label: "Close", variant: "ghost", onClick: () => closeModal() }
+      ]
+    });
+  }
+
   // -----------------------------
   // Challenge list (daily shared)
   // -----------------------------
@@ -530,12 +737,11 @@ function saveJSON(key, val) {
   }
 
   // -----------------------------
-  // Simulated crowd count (stable per day)
+  // Simulated crowd count (stable per UTC day)
   // -----------------------------
   function getTodaysCrowdNumber() {
     const seed = todaySeed("crowd");
     const rnd = mulberry32(seed);
-    // plausible range: 8k to 38k with slight bias
     const base = 8000 + Math.floor(rnd() * 24000);
     const wiggle = Math.floor(rnd() * 1800);
     const n = base + wiggle;
@@ -543,7 +749,7 @@ function saveJSON(key, val) {
   }
 
   // -----------------------------
-  // Global: streak + daily rollover logic
+  // Streak + daily rollover (UTC)
   // -----------------------------
   function getStreak() {
     const n = parseInt(localStorage.getItem(LS.streak) || "0", 10);
@@ -554,18 +760,15 @@ function saveJSON(key, val) {
   }
 
   function getTodayChallengeState() {
-    const dayKey = localDayKey();
+    const dayKey = utcDayKey();
     const s = loadJSON(LS.todayState, null);
     if (!s || s.dayKey !== dayKey) {
-      // new day: carryover logic -> if yesterday in progress, mark failed (optional)
-      // We keep it simple: reset to Not started daily.
       const fresh = {
         dayKey,
         state: "not_started", // not_started | in_progress | completed | failed
         startedAt: null,
         resultAt: null,
-        challengeId: getTodaysChallenge().id,
-        awaySeconds: 0
+        challengeId: getTodaysChallenge().id
       };
       saveJSON(LS.todayState, fresh);
       return fresh;
@@ -580,15 +783,12 @@ function saveJSON(key, val) {
   }
 
   function reconcileStreakForNewDay() {
-    // If user completed a previous day and then misses a day, we break streak
-    // We can only infer using lastStreakDay.
-    const today = localDayKey();
+    const today = utcDayKey();
     const last = localStorage.getItem(LS.lastStreakDay);
     if (!last) return;
 
-    // If last day is older than yesterday, break streak.
-    const lastDate = new Date(last + "T00:00:00");
-    const todayDate = new Date(today + "T00:00:00");
+    const lastDate = new Date(last + "T00:00:00Z");
+    const todayDate = new Date(today + "T00:00:00Z");
     const diffDays = Math.floor((todayDate - lastDate) / (24 * 3600 * 1000));
     if (diffDays >= 2) {
       setStreak(0);
@@ -599,9 +799,17 @@ function saveJSON(key, val) {
   // -----------------------------
   // Hub rendering
   // -----------------------------
+  function stateLabel(s) {
+    if (s === "not_started") return "Not started";
+    if (s === "in_progress") return "In progress";
+    if (s === "completed") return "Completed";
+    if (s === "failed") return "Failed";
+    return "Not started";
+  }
+
   function renderHub() {
     const c = getTodaysChallenge();
-    $("#miniChallengeName").textContent = `Today: ${c.title}`;
+    $("#miniChallengeName").textContent = `Today (UTC): ${c.title}`;
 
     const crowd = getTodaysCrowdNumber();
     $("#crowdNumber").textContent = `${crowd} people are in today`;
@@ -619,35 +827,27 @@ function saveJSON(key, val) {
       : st.state === "completed" ? "You did it. Again tomorrow?"
       : "Failed. Tomorrow exists.";
 
-    const statusPill = $("#statusPill");
     const statusText = $("#statusText");
     const dot = $("#statusDot");
-    statusText.textContent = `Today: ${label}`;
-    dot.classList.remove("ok","bad");
+    statusText.textContent = `Today (UTC): ${label}`;
+    dot.classList.remove("ok", "bad");
     if (st.state === "completed") dot.classList.add("ok");
     else if (st.state === "failed") dot.classList.add("bad");
 
-    // also set proof date lines
-    const dk = localDayKey();
+    // share dates
+    const dk = utcDayKey();
     $("#shareDate1").textContent = dk;
     $("#shareDate2").textContent = dk;
     $("#shareDate3").textContent = dk;
-  }
 
-  function stateLabel(s) {
-    if (s === "not_started") return "Not started";
-    if (s === "in_progress") return "In progress";
-    if (s === "completed") return "Completed";
-    if (s === "failed") return "Failed";
-    return "Not started";
+    updateAccountPill();
   }
 
   // -----------------------------
   // Shared anti-leave detector (15s away)
   // -----------------------------
   const Visibility = {
-    activeRule: null, // { type, onFail, onWarn?, awayStart, thresholdMs }
-    tick: null
+    activeRule: null // {type, thresholdMs, awayStart, onTrigger}
   };
 
   function startLeaveRule({ type, thresholdMs = 15000, onTrigger }) {
@@ -664,39 +864,28 @@ function saveJSON(key, val) {
   }
 
   function initVisibilityWatcher() {
+    function checkBack() {
+      const rule = Visibility.activeRule;
+      if (!rule || !rule.awayStart) return;
+      const awayMs = Date.now() - rule.awayStart;
+      rule.awayStart = null;
+      if (awayMs >= rule.thresholdMs) rule.onTrigger({ awayMs });
+    }
+
     document.addEventListener("visibilitychange", () => {
       const rule = Visibility.activeRule;
       if (!rule) return;
-
-      if (document.hidden) {
-        rule.awayStart = Date.now();
-      } else {
-        // came back: check duration away
-        if (rule.awayStart) {
-          const awayMs = Date.now() - rule.awayStart;
-          rule.awayStart = null;
-          if (awayMs >= rule.thresholdMs) {
-            rule.onTrigger({ awayMs });
-          }
-        }
-      }
+      if (document.hidden) rule.awayStart = Date.now();
+      else checkBack();
     });
 
-    // Safety: also detect blur/focus as fallback (not perfect but helps)
     window.addEventListener("blur", () => {
       const rule = Visibility.activeRule;
       if (!rule) return;
       if (!rule.awayStart) rule.awayStart = Date.now();
     });
-    window.addEventListener("focus", () => {
-      const rule = Visibility.activeRule;
-      if (!rule || !rule.awayStart) return;
-      const awayMs = Date.now() - rule.awayStart;
-      rule.awayStart = null;
-      if (awayMs >= rule.thresholdMs) {
-        rule.onTrigger({ awayMs });
-      }
-    });
+
+    window.addEventListener("focus", checkBack);
   }
 
   // -----------------------------
@@ -708,7 +897,6 @@ function saveJSON(key, val) {
     const c = getTodaysChallenge();
     $("#challengeTitle").textContent = c.title;
     $("#challengeDesc").textContent = c.desc;
-
     $("#shareChallengeName").textContent = c.title;
 
     const st = getTodayChallengeState();
@@ -716,31 +904,28 @@ function saveJSON(key, val) {
     $("#challengeStatusSub").textContent =
       st.state === "not_started" ? "Press “Join Challenge” to begin."
       : st.state === "in_progress" ? "Run active. Leave 15+ seconds → fail."
-      : st.state === "completed" ? "Completed. Return tomorrow for the next one."
+      : st.state === "completed" ? "Completed. Return tomorrow (UTC) for the next one."
       : "Failed. Return tomorrow. No excuses (but yes, rest).";
 
-    // Buttons
     $("#joinChallengeBtn").disabled = (st.state === "in_progress" || st.state === "completed");
     $("#completeChallengeBtn").disabled = (st.state !== "in_progress");
     $("#failChallengeBtn").disabled = (st.state !== "in_progress");
 
-    // Share actions enabled after completion or failure
     const shareEnabled = (st.state === "completed" || st.state === "failed");
     $("#copyShare1").disabled = !shareEnabled;
     $("#downloadShare1").disabled = !shareEnabled;
 
     $("#shareResult1").textContent =
-      st.state === "completed" ? "COMPLETED ✅"
-      : st.state === "failed" ? "FAILED ❌"
-      : "—";
+      st.state === "completed" ? "COMPLETED ✅" :
+      st.state === "failed" ? "FAILED ❌" :
+      "—";
 
-    // countdown to reset
+    // countdown to next UTC midnight
     if (resetTimer) clearInterval(resetTimer);
     resetTimer = setInterval(() => {
-      const ms = nextLocalMidnight().getTime() - Date.now();
+      const ms = nextUtcMidnight().getTime() - Date.now();
       $("#resetCountdown").textContent = msToResetCountdown(ms);
       if (ms <= 0) {
-        // midnight pass: reset UI
         clearInterval(resetTimer);
         resetTimer = null;
         renderHub();
@@ -755,23 +940,30 @@ function saveJSON(key, val) {
       title: "Rule check",
       body: `
         <p><b>Leaving this tab for 15+ seconds will fail the run.</b></p>
-        <p>This is local-only, no tracking. The point is commitment, not surveillance.</p>
+        <p>Local-only in Anonymous. In Auth mode, the result is saved to DB.</p>
       `,
       actions: [
-        { label: "Cancel", variant: "ghost", onClick: () => { closeModal(); } },
+        { label: "Cancel", variant: "ghost", onClick: () => closeModal() },
         {
           label: "Join Challenge",
           variant: "primary",
-          onClick: () => {
+          onClick: async () => {
             closeModal();
-            const st = setTodayChallengeState({
+
+            setTodayChallengeState({
               state: "in_progress",
               startedAt: Date.now(),
               challengeId: c.id,
               resultAt: null
             });
 
-            // Start anti-leave rule: fail
+            // DB
+            await dbUpsertDailyRun({
+              status: "in_progress",
+              challengeId: c.id,
+              startedAtISO: new Date().toISOString()
+            });
+
             startLeaveRule({
               type: "challenge24",
               thresholdMs: 15000,
@@ -789,24 +981,29 @@ function saveJSON(key, val) {
     });
   }
 
-  function completeChallenge() {
+  function bumpText(el) {
+    if (!el) return;
+    el.style.transform = "translateY(-2px) scale(1.03)";
+    el.style.transition = "transform .18s ease";
+    setTimeout(() => {
+      el.style.transform = "translateY(0) scale(1)";
+    }, 180);
+  }
+
+  async function completeChallenge() {
     const st = getTodayChallengeState();
     if (st.state !== "in_progress") return;
 
     stopLeaveRule();
 
-    // Streak logic: only one completion per day
-    const today = localDayKey();
+    const today = utcDayKey();
     const last = localStorage.getItem(LS.lastStreakDay);
 
     let streak = getStreak();
-    if (last === today) {
-      // already counted today, keep streak
-    } else {
-      // if last was yesterday -> increment, else reset to 1
+    if (last !== today) {
       if (last) {
-        const lastDate = new Date(last + "T00:00:00");
-        const todayDate = new Date(today + "T00:00:00");
+        const lastDate = new Date(last + "T00:00:00Z");
+        const todayDate = new Date(today + "T00:00:00Z");
         const diffDays = Math.floor((todayDate - lastDate) / (24 * 3600 * 1000));
         if (diffDays === 1) streak += 1;
         else streak = 1;
@@ -819,7 +1016,13 @@ function saveJSON(key, val) {
 
     setTodayChallengeState({ state: "completed", resultAt: Date.now() });
 
-    // small satisfying animation: bump streak
+    await dbUpsertDailyRun({
+      status: "completed",
+      challengeId: st.challengeId,
+      startedAtISO: st.startedAt ? new Date(st.startedAt).toISOString() : null,
+      endedAtISO: new Date().toISOString()
+    });
+
     bumpText($("#streakBig"));
     bumpText($("#shareStreak1"));
 
@@ -828,13 +1031,21 @@ function saveJSON(key, val) {
     renderHub();
   }
 
-  function failChallenge(reason = "Failed.") {
+  async function failChallenge(reason = "Failed.") {
     const st = getTodayChallengeState();
     if (st.state !== "in_progress") return;
 
     stopLeaveRule();
-
     setTodayChallengeState({ state: "failed", resultAt: Date.now() });
+
+    await dbUpsertDailyRun({
+      status: "failed",
+      challengeId: st.challengeId,
+      startedAtISO: st.startedAt ? new Date(st.startedAt).toISOString() : null,
+      endedAtISO: new Date().toISOString(),
+      failReason: reason
+    });
+
     toast("Run failed", reason);
 
     renderChallenge24();
@@ -848,12 +1059,10 @@ function saveJSON(key, val) {
     running: false,
     totalMs: minutesToMs(25),
     remainingMs: minutesToMs(25),
-    startTs: null,
+    startISO: null,
     tick: null,
-    healOnLeave: true,
     selectedMin: 25,
-    task: "",
-    lastSecondMark: 0
+    task: ""
   };
 
   function bossSetDuration(min) {
@@ -873,7 +1082,6 @@ function saveJSON(key, val) {
   function bossAttackFx() {
     const slash = $("#bossSlash");
     slash.classList.remove("on");
-    // reflow
     void slash.offsetWidth;
     slash.classList.add("on");
   }
@@ -888,6 +1096,11 @@ function saveJSON(key, val) {
     setTimeout(() => glow.style.opacity = "0", 240);
   }
 
+  function updateBossUI() {
+    $("#bossTimer").textContent = msToClock(Boss.remainingMs);
+    setBossHp(Boss.remainingMs / Boss.totalMs);
+  }
+
   function bossStart() {
     const task = ($("#bossTask").value || "").trim();
     if (!task) {
@@ -900,7 +1113,7 @@ function saveJSON(key, val) {
       title: "Rule check",
       body: `
         <p><b>Leaving this tab for 15+ seconds makes the boss heal +20% HP.</b></p>
-        <p>It’s still local-only. No tracking. Just pressure.</p>
+        <p>Anonymous = local-only. Auth = session stored in DB.</p>
       `,
       actions: [
         { label: "Cancel", variant: "ghost", onClick: () => closeModal() },
@@ -912,18 +1125,16 @@ function saveJSON(key, val) {
 
             Boss.task = task;
             Boss.running = true;
-            Boss.startTs = Date.now();
-            Boss.lastSecondMark = Date.now();
+            Boss.startISO = new Date().toISOString();
+
             $("#startBossBtn").disabled = true;
             $("#stopBossBtn").disabled = false;
             $("#bossState").textContent = `Fighting for: “${task}”. Keep the tab.`;
 
-            // anti-leave: heal +20% HP
             startLeaveRule({
               type: "bossFight",
               thresholdMs: 15000,
               onTrigger: ({ awayMs }) => {
-                // heal 20% of total, capped to total
                 const healMs = Math.floor(Boss.totalMs * 0.20);
                 Boss.remainingMs = Math.min(Boss.totalMs, Boss.remainingMs + healMs);
                 bossHealFx();
@@ -936,13 +1147,9 @@ function saveJSON(key, val) {
               if (!Boss.running) return;
               Boss.remainingMs -= 1000;
               if (Boss.remainingMs < 0) Boss.remainingMs = 0;
-
               bossAttackFx();
               updateBossUI();
-
-              if (Boss.remainingMs === 0) {
-                bossVictory();
-              }
+              if (Boss.remainingMs === 0) bossVictory();
             }, 1000);
 
             toast("Boss Fight", "Fight started. Deal damage by staying.");
@@ -952,8 +1159,9 @@ function saveJSON(key, val) {
     });
   }
 
-  function bossStop(reason = "Stopped.") {
+  async function bossStop(reason = "Stopped.") {
     if (!Boss.running) return;
+
     Boss.running = false;
     clearInterval(Boss.tick);
     Boss.tick = null;
@@ -962,27 +1170,45 @@ function saveJSON(key, val) {
     $("#startBossBtn").disabled = false;
     $("#stopBossBtn").disabled = true;
     $("#bossState").textContent = `Idle. ${reason}`;
+
+    // DB: store stopped if they ended early
+    if (Boss.remainingMs > 0) {
+      await dbInsertSession({
+        mode: "bossFight",
+        taskName: Boss.task,
+        durationMinutes: Boss.selectedMin,
+        status: "stopped",
+        startedAtISO: Boss.startISO,
+        endedAtISO: new Date().toISOString()
+      });
+    }
   }
 
-  function updateBossUI() {
-    $("#bossTimer").textContent = msToClock(Boss.remainingMs);
-    setBossHp(Boss.remainingMs / Boss.totalMs);
-  }
+  async function bossVictory() {
+    await bossStop("Victory.");
 
-  function bossVictory() {
-    bossStop("Victory.");
     toast("Victory", "Boss defeated. Procrastination took a hit.");
 
-    // Save history
+    // Save local history
     const list = loadJSON(LS.bossHistory, []);
     const entry = {
-      dayKey: localDayKey(),
+      dayKey: utcDayKey(),
       task: Boss.task,
       minutes: Boss.selectedMin,
       ts: Date.now()
     };
     list.unshift(entry);
     saveJSON(LS.bossHistory, list.slice(0, 20));
+
+    // DB: store cleared (override: because bossStop may have inserted stopped)
+    await dbInsertSession({
+      mode: "bossFight",
+      taskName: Boss.task,
+      durationMinutes: Boss.selectedMin,
+      status: "cleared",
+      startedAtISO: Boss.startISO,
+      endedAtISO: new Date().toISOString()
+    });
 
     // Update share card
     $("#shareBossTask").textContent = Boss.task;
@@ -1024,7 +1250,8 @@ function saveJSON(key, val) {
     remainingMs: minutesToMs(25),
     tick: null,
     selectedMin: 25,
-    people: 0
+    people: 0,
+    startISO: null
   };
 
   function arenaSetDuration(min) {
@@ -1036,10 +1263,9 @@ function saveJSON(key, val) {
   }
 
   function renderArenaPeople() {
-    // stable per day + selected duration; simulate "now"
     const seed = todaySeed(`arena:${Arena.selectedMin}`);
     const rnd = mulberry32(seed);
-    const base = 300 + Math.floor(rnd() * 1600); // 300..1900
+    const base = 300 + Math.floor(rnd() * 1600);
     const wave = Math.floor(rnd() * 220);
     Arena.people = base + wave;
     $("#arenaPeople").textContent = `${Arena.people.toLocaleString()} focusing right now`;
@@ -1065,7 +1291,7 @@ function saveJSON(key, val) {
       title: "Rule check",
       body: `
         <p><b>Leaving this tab for 15+ seconds fails the session.</b></p>
-        <p>This is a silent room, not a prison. It’s local-only.</p>
+        <p>Anonymous = local-only. Auth = session stored in DB.</p>
       `,
       actions: [
         { label: "Cancel", variant: "ghost", onClick: () => closeModal() },
@@ -1074,7 +1300,10 @@ function saveJSON(key, val) {
           variant: "primary",
           onClick: () => {
             closeModal();
+
             Arena.running = true;
+            Arena.startISO = new Date().toISOString();
+
             $("#startArenaBtn").disabled = true;
             $("#stopArenaBtn").disabled = false;
             $("#arenaState").textContent = "Session active. Stay. Breathe. Do.";
@@ -1093,10 +1322,7 @@ function saveJSON(key, val) {
               if (Arena.remainingMs < 0) Arena.remainingMs = 0;
 
               $("#arenaTimer").textContent = msToClock(Arena.remainingMs);
-
-              if (Arena.remainingMs === 0) {
-                arenaVictory();
-              }
+              if (Arena.remainingMs === 0) arenaVictory();
             }, 1000);
 
             toast("Focus Arena", "Session started. Quiet pressure engaged.");
@@ -1106,8 +1332,9 @@ function saveJSON(key, val) {
     });
   }
 
-  function arenaStop(reason = "Stopped.") {
+  async function arenaStop(reason = "Stopped.") {
     if (!Arena.running) return;
+
     Arena.running = false;
     clearInterval(Arena.tick);
     Arena.tick = null;
@@ -1116,25 +1343,45 @@ function saveJSON(key, val) {
     $("#startArenaBtn").disabled = false;
     $("#stopArenaBtn").disabled = true;
     $("#arenaState").textContent = `Idle. ${reason}`;
+
+    // DB: stopped
+    if (Arena.remainingMs > 0) {
+      await dbInsertSession({
+        mode: "focusArena",
+        durationMinutes: Arena.selectedMin,
+        status: "stopped",
+        startedAtISO: Arena.startISO,
+        endedAtISO: new Date().toISOString()
+      });
+    }
   }
 
-  function arenaVictory() {
-    arenaStop("Session cleared.");
+  async function arenaVictory() {
+    await arenaStop("Session cleared.");
+
     toast("Session cleared", "Clean win. The arena approves.");
 
-    // badges: +1 per successful session; every 3 -> “badge earned”
+    // badges
     const b = getArenaBadges() + 1;
     setArenaBadges(b);
     renderArenaBadges();
 
-    const badgeEarned = (b % 3 === 0);
-    if (badgeEarned) toast("Badge", "Badge earned. Tiny reward, big ego.");
+    if (b % 3 === 0) toast("Badge", "Badge earned. Tiny reward, big ego.");
 
-    // save history
+    // local history
     const list = loadJSON(LS.arenaHistory, []);
-    const entry = { dayKey: localDayKey(), minutes: Arena.selectedMin, ts: Date.now(), result: "cleared" };
+    const entry = { dayKey: utcDayKey(), minutes: Arena.selectedMin, ts: Date.now(), result: "cleared" };
     list.unshift(entry);
     saveJSON(LS.arenaHistory, list.slice(0, 30));
+
+    // DB: cleared
+    await dbInsertSession({
+      mode: "focusArena",
+      durationMinutes: Arena.selectedMin,
+      status: "cleared",
+      startedAtISO: Arena.startISO,
+      endedAtISO: new Date().toISOString()
+    });
 
     $("#shareArenaResult").textContent = "CLEARED ✅";
     $("#shareArenaDur").textContent = `${Arena.selectedMin} min`;
@@ -1145,16 +1392,26 @@ function saveJSON(key, val) {
     renderArenaHistory();
   }
 
-  function arenaFail(reason = "Failed.") {
+  async function arenaFail(reason = "Failed.") {
     if (!Arena.running) return;
-    arenaStop("Failed.");
+
+    await arenaStop("Failed.");
     toast("Session failed", reason);
 
-    // save history
+    // local history
     const list = loadJSON(LS.arenaHistory, []);
-    const entry = { dayKey: localDayKey(), minutes: Arena.selectedMin, ts: Date.now(), result: "failed" };
+    const entry = { dayKey: utcDayKey(), minutes: Arena.selectedMin, ts: Date.now(), result: "failed" };
     list.unshift(entry);
     saveJSON(LS.arenaHistory, list.slice(0, 30));
+
+    // DB: failed
+    await dbInsertSession({
+      mode: "focusArena",
+      durationMinutes: Arena.selectedMin,
+      status: "failed",
+      startedAtISO: Arena.startISO,
+      endedAtISO: new Date().toISOString()
+    });
 
     $("#shareArenaResult").textContent = "FAILED ❌";
     $("#shareArenaDur").textContent = `${Arena.selectedMin} min`;
@@ -1207,7 +1464,6 @@ function saveJSON(key, val) {
       await navigator.clipboard.writeText(text);
       toast("Copied", "Share text copied to clipboard.");
     } catch {
-      // fallback
       const ta = document.createElement("textarea");
       ta.value = text;
       document.body.appendChild(ta);
@@ -1231,79 +1487,6 @@ function saveJSON(key, val) {
     }, 100);
   }
 
-  function drawShareCard({ title, subtitle, lines, footer }) {
-    // Canvas: clean, premium-ish card. Adapts to theme.
-    const theme = document.documentElement.getAttribute("data-theme") || "dark";
-    const W = 1200, H = 630;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext("2d");
-
-    // Background
-    ctx.fillStyle = theme === "light" ? "#f6f7fb" : "#0b0c10";
-    ctx.fillRect(0, 0, W, H);
-
-    // Soft gradients
-    const g1 = ctx.createRadialGradient(260, 140, 40, 260, 140, 520);
-    g1.addColorStop(0, theme === "light" ? "rgba(31,143,255,0.18)" : "rgba(141,217,255,0.18)");
-    g1.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = g1; ctx.fillRect(0, 0, W, H);
-
-    const g2 = ctx.createRadialGradient(980, 520, 60, 980, 520, 560);
-    g2.addColorStop(0, theme === "light" ? "rgba(18,182,107,0.14)" : "rgba(178,255,204,0.14)");
-    g2.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = g2; ctx.fillRect(0, 0, W, H);
-
-    // Card
-    const r = 34;
-    roundRect(ctx, 70, 70, W - 140, H - 140, r);
-    ctx.fillStyle = theme === "light" ? "rgba(255,255,255,0.88)" : "rgba(255,255,255,0.06)";
-    ctx.fill();
-    ctx.strokeStyle = theme === "light" ? "rgba(10,12,16,0.10)" : "rgba(255,255,255,0.12)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Title
-    ctx.fillStyle = theme === "light" ? "rgba(10,12,16,0.92)" : "rgba(255,255,255,0.92)";
-    ctx.font = "800 54px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
-    ctx.fillText("You vs Everyone", 120, 170);
-
-    // Subtitle
-    ctx.fillStyle = theme === "light" ? "rgba(10,12,16,0.62)" : "rgba(255,255,255,0.62)";
-    ctx.font = "600 26px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
-    ctx.fillText(subtitle, 120, 215);
-
-    // Divider
-    ctx.strokeStyle = theme === "light" ? "rgba(10,12,16,0.10)" : "rgba(255,255,255,0.12)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(120, 250);
-    ctx.lineTo(W - 120, 250);
-    ctx.stroke();
-
-    // Main block
-    ctx.fillStyle = theme === "light" ? "rgba(10,12,16,0.92)" : "rgba(255,255,255,0.92)";
-    ctx.font = "800 40px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
-    ctx.fillText(title, 120, 320);
-
-    // Lines
-    ctx.fillStyle = theme === "light" ? "rgba(10,12,16,0.70)" : "rgba(255,255,255,0.70)";
-    ctx.font = "650 28px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
-    let y = 370;
-    lines.forEach((ln) => {
-      ctx.fillText(ln, 120, y);
-      y += 44;
-    });
-
-    // Footer
-    ctx.fillStyle = theme === "light" ? "rgba(10,12,16,0.45)" : "rgba(255,255,255,0.45)";
-    ctx.font = "650 22px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace";
-    ctx.fillText(footer, 120, H - 130);
-
-    return canvas;
-  }
-
   function roundRect(ctx, x, y, w, h, r) {
     const rr = Math.min(r, w / 2, h / 2);
     ctx.beginPath();
@@ -1315,11 +1498,75 @@ function saveJSON(key, val) {
     ctx.closePath();
   }
 
+  function drawShareCard({ title, subtitle, lines, footer }) {
+    const theme = document.documentElement.getAttribute("data-theme") || "dark";
+    const W = 1200, H = 630;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+
+    ctx.fillStyle = theme === "light" ? "#f6f7fb" : "#0b0c10";
+    ctx.fillRect(0, 0, W, H);
+
+    const g1 = ctx.createRadialGradient(260, 140, 40, 260, 140, 520);
+    g1.addColorStop(0, theme === "light" ? "rgba(31,143,255,0.18)" : "rgba(141,217,255,0.18)");
+    g1.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g1; ctx.fillRect(0, 0, W, H);
+
+    const g2 = ctx.createRadialGradient(980, 520, 60, 980, 520, 560);
+    g2.addColorStop(0, theme === "light" ? "rgba(18,182,107,0.14)" : "rgba(178,255,204,0.14)");
+    g2.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g2; ctx.fillRect(0, 0, W, H);
+
+    const r = 34;
+    roundRect(ctx, 70, 70, W - 140, H - 140, r);
+    ctx.fillStyle = theme === "light" ? "rgba(255,255,255,0.88)" : "rgba(255,255,255,0.06)";
+    ctx.fill();
+    ctx.strokeStyle = theme === "light" ? "rgba(10,12,16,0.10)" : "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = theme === "light" ? "rgba(10,12,16,0.92)" : "rgba(255,255,255,0.92)";
+    ctx.font = "800 54px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+    ctx.fillText("You vs Everyone", 120, 170);
+
+    ctx.fillStyle = theme === "light" ? "rgba(10,12,16,0.62)" : "rgba(255,255,255,0.62)";
+    ctx.font = "600 26px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+    ctx.fillText(subtitle, 120, 215);
+
+    ctx.strokeStyle = theme === "light" ? "rgba(10,12,16,0.10)" : "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(120, 250);
+    ctx.lineTo(W - 120, 250);
+    ctx.stroke();
+
+    ctx.fillStyle = theme === "light" ? "rgba(10,12,16,0.92)" : "rgba(255,255,255,0.92)";
+    ctx.font = "800 40px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+    ctx.fillText(title, 120, 320);
+
+    ctx.fillStyle = theme === "light" ? "rgba(10,12,16,0.70)" : "rgba(255,255,255,0.70)";
+    ctx.font = "650 28px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+    let y = 370;
+    lines.forEach((ln) => {
+      ctx.fillText(ln, 120, y);
+      y += 44;
+    });
+
+    ctx.fillStyle = theme === "light" ? "rgba(10,12,16,0.45)" : "rgba(255,255,255,0.45)";
+    ctx.font = "650 22px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace";
+    ctx.fillText(footer, 120, H - 130);
+
+    return canvas;
+  }
+
   // -----------------------------
-  // Crowd + Arena visuals (canvas)
+  // Crowd + Arena visuals
   // -----------------------------
   function initCrowdCanvas() {
     const canvas = $("#crowdCanvas");
+    if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const seed = todaySeed("crowdParticles");
     const rnd = mulberry32(seed);
@@ -1340,11 +1587,6 @@ function saveJSON(key, val) {
       const theme = document.documentElement.getAttribute("data-theme") || "dark";
       ctx.clearRect(0, 0, W, H);
 
-      // background wash
-      ctx.fillStyle = theme === "light" ? "rgba(255,255,255,0.0)" : "rgba(0,0,0,0.0)";
-      ctx.fillRect(0, 0, W, H);
-
-      // dots
       for (const d of dots) {
         d.p += 0.02;
         d.x += d.vx;
@@ -1364,7 +1606,6 @@ function saveJSON(key, val) {
         ctx.fill();
       }
 
-      // subtle "everyone" band
       const grad = ctx.createLinearGradient(0, 0, W, 0);
       grad.addColorStop(0, "rgba(0,0,0,0)");
       grad.addColorStop(0.5, theme === "light" ? "rgba(18,182,107,0.08)" : "rgba(178,255,204,0.08)");
@@ -1374,11 +1615,13 @@ function saveJSON(key, val) {
 
       requestAnimationFrame(frame);
     }
+
     requestAnimationFrame(frame);
   }
 
   function initArenaCanvas() {
     const canvas = $("#arenaCanvas");
+    if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const W = canvas.width, H = canvas.height;
 
@@ -1389,8 +1632,7 @@ function saveJSON(key, val) {
     const rings = Array.from({ length: 5 }, (_, i) => ({
       cx: W * (0.25 + rnd() * 0.5),
       cy: H * (0.25 + rnd() * 0.5),
-      r0: 22 + i * 18,
-      speed: 0.012 + rnd() * 0.01
+      r0: 22 + i * 18
     }));
 
     const dots = Array.from({ length: 64 }, () => ({
@@ -1404,12 +1646,8 @@ function saveJSON(key, val) {
       const theme = document.documentElement.getAttribute("data-theme") || "dark";
       ctx.clearRect(0, 0, W, H);
 
-      // base
-      ctx.fillStyle = theme === "light" ? "rgba(255,255,255,0.0)" : "rgba(0,0,0,0.0)";
-      ctx.fillRect(0, 0, W, H);
-
-      // pulsing rings
       t += 0.016;
+
       rings.forEach((rg, i) => {
         const pr = rg.r0 + 18 * (0.5 + 0.5 * Math.sin(t * (1 + i * 0.12)));
         ctx.beginPath();
@@ -1421,8 +1659,7 @@ function saveJSON(key, val) {
         ctx.stroke();
       });
 
-      // sync dots
-      dots.forEach((d, i) => {
+      dots.forEach((d) => {
         const pulse = 0.45 + 0.45 * Math.sin(t * 2 + d.phase);
         const alpha = Arena.running ? 0.16 + 0.22 * pulse : 0.10 + 0.12 * pulse;
         ctx.beginPath();
@@ -1433,8 +1670,7 @@ function saveJSON(key, val) {
         ctx.fill();
       });
 
-      // arena “floor”
-      const g = ctx.createRadialGradient(W/2, H*1.1, 20, W/2, H*1.1, H*0.9);
+      const g = ctx.createRadialGradient(W / 2, H * 1.1, 20, W / 2, H * 1.1, H * 0.9);
       g.addColorStop(0, theme === "light" ? "rgba(10,12,16,0.08)" : "rgba(255,255,255,0.06)");
       g.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = g;
@@ -1442,25 +1678,14 @@ function saveJSON(key, val) {
 
       requestAnimationFrame(frame);
     }
-    requestAnimationFrame(frame);
-  }
 
-  // -----------------------------
-  // Micro animation helpers
-  // -----------------------------
-  function bumpText(el) {
-    el.style.transform = "translateY(-2px) scale(1.03)";
-    el.style.transition = "transform .18s ease";
-    setTimeout(() => {
-      el.style.transform = "translateY(0) scale(1)";
-    }, 180);
+    requestAnimationFrame(frame);
   }
 
   // -----------------------------
   // Navigation wiring
   // -----------------------------
-    function initNav() {
-    // Mode enter buttons
+  function initNav() {
     $$('[data-action="enterMode"]').forEach(btn => {
       btn.addEventListener("click", () => {
         const mode = btn.getAttribute("data-mode");
@@ -1471,10 +1696,8 @@ function saveJSON(key, val) {
           showScreen("#screenBossFight");
           renderBossHistory();
           updateBossUI();
-          // keep share disabled until a victory
           $("#copyShare2").disabled = true;
           $("#downloadShare2").disabled = true;
-          // reset share card to placeholders
           $("#shareBossTask").textContent = "—";
           $("#shareBossDur").textContent = "—";
         } else if (mode === "focusArena") {
@@ -1482,7 +1705,6 @@ function saveJSON(key, val) {
           renderArenaPeople();
           renderArenaBadges();
           renderArenaHistory();
-          // keep share disabled until end
           $("#copyShare3").disabled = true;
           $("#downloadShare3").disabled = true;
           $("#shareArenaResult").textContent = "—";
@@ -1492,26 +1714,22 @@ function saveJSON(key, val) {
       });
     });
 
-    // Back buttons
     $$('[data-action="backHome"]').forEach(btn => {
-      btn.addEventListener("click", () => {
-        // stop any running timers/rules safely
-        if (Boss.running) bossStop("Paused (left the fight).");
-        if (Arena.running) arenaStop("Paused (left the arena).");
-        // Note: 24h challenge stays in progress if you go home (same tab).
-        // The rule is tab-leave, not screen navigation.
+      btn.addEventListener("click", async () => {
+        if (Boss.running) await bossStop("Paused (left the fight).");
+        if (Arena.running) await arenaStop("Paused (left the arena).");
         showScreen("#screenHome");
         renderHub();
       });
     });
 
-    // Brand click → home
-    $("#goHome").addEventListener("click", () => {
-      if (Boss.running) bossStop("Paused (left the fight).");
-      if (Arena.running) arenaStop("Paused (left the arena).");
+    $("#goHome").addEventListener("click", async () => {
+      if (Boss.running) await bossStop("Paused (left the fight).");
+      if (Arena.running) await arenaStop("Paused (left the arena).");
       showScreen("#screenHome");
       renderHub();
     });
+
     $("#goHome").addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
@@ -1521,70 +1739,40 @@ function saveJSON(key, val) {
   }
 
   // -----------------------------
-  // Escape helper
-  // -----------------------------
-  function escapeHTML(str) {
-    return String(str)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  function escapeAttr(str) {
-  // безопасно для value="..."
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-  // -----------------------------
   // Wire up buttons + inputs
   // -----------------------------
   function initActions() {
+    // Account pill
+    const accountPill = $("#accountPill");
+    if (accountPill) accountPill.addEventListener("click", openAccountMenu);
+
     // 24h challenge
     $("#joinChallengeBtn").addEventListener("click", joinChallenge);
     $("#completeChallengeBtn").addEventListener("click", completeChallenge);
-    $("#failChallengeBtn").addEventListener("click", () => failChallenge("Manual fail. Honest.")); // optional
+    $("#failChallengeBtn").addEventListener("click", () => failChallenge("Manual fail. Honest."));
 
     $("#copyShare1").addEventListener("click", () => {
       const st = getTodayChallengeState();
       const c = getTodaysChallenge();
-      const date = localDayKey();
+      const date = utcDayKey();
       const streak = getStreak();
-      const result =
-        st.state === "completed" ? "COMPLETED ✅" :
-        st.state === "failed" ? "FAILED ❌" : "—";
-      const text = buildShareText({
-        date,
-        title: c.title,
-        result,
-        streak
-      });
+      const result = st.state === "completed" ? "COMPLETED ✅" : st.state === "failed" ? "FAILED ❌" : "—";
+      const text = buildShareText({ date, title: c.title, result, streak });
       copyToClipboard(text);
     });
 
-    $("#downloadShare1").addEventListener("click", async () => {
+    $("#downloadShare1").addEventListener("click", () => {
       const st = getTodayChallengeState();
       const c = getTodaysChallenge();
-      const date = localDayKey();
+      const date = utcDayKey();
       const streak = getStreak();
-      const result =
-        st.state === "completed" ? "COMPLETED ✅" :
-        st.state === "failed" ? "FAILED ❌" : "—";
+      const result = st.state === "completed" ? "COMPLETED ✅" : st.state === "failed" ? "FAILED ❌" : "—";
 
       const canvas = drawShareCard({
         title: c.title,
-        subtitle: `Day ${date} • 24h Challenge`,
-        lines: [
-          `Result: ${result}`,
-          `Streak: ${streak}`
-        ],
-        footer: "Simulated crowd • Local-only • No tracking"
+        subtitle: `Day ${date} • 24h Challenge (UTC)`,
+        lines: [`Result: ${result}`, `Streak: ${streak}`],
+        footer: "Simulated crowd • Local-only (anon) • No tracking"
       });
 
       canvas.toBlob((blob) => {
@@ -1593,7 +1781,7 @@ function saveJSON(key, val) {
       }, "image/png", 0.92);
     });
 
-    // Boss fight presets
+    // Boss presets
     $$("#screenBossFight .seg-btn[data-min]").forEach(btn => {
       btn.addEventListener("click", () => {
         if (Boss.running) return toast("Boss Fight", "Finish or stop the fight to change duration.");
@@ -1607,8 +1795,7 @@ function saveJSON(key, val) {
     $("#stopBossBtn").addEventListener("click", () => bossStop("Stopped. The boss smirks."));
 
     $("#copyShare2").addEventListener("click", () => {
-      // If share enabled, we have last victory info in history top or UI fields
-      const date = localDayKey();
+      const date = utcDayKey();
       const task = $("#shareBossTask").textContent.trim();
       const dur = $("#shareBossDur").textContent.trim();
       const text = [
@@ -1621,18 +1808,15 @@ function saveJSON(key, val) {
     });
 
     $("#downloadShare2").addEventListener("click", () => {
-      const date = localDayKey();
+      const date = utcDayKey();
       const task = $("#shareBossTask").textContent.trim();
       const dur = $("#shareBossDur").textContent.trim();
 
       const canvas = drawShareCard({
         title: "Boss Defeated",
         subtitle: `Day ${date} • Procrastination Boss Fight`,
-        lines: [
-          `Task: ${task}`,
-          `Duration: ${dur}`
-        ],
-        footer: "Local-only • No tracking"
+        lines: [`Task: ${task}`, `Duration: ${dur}`],
+        footer: "Local-only (anon) • No tracking"
       });
 
       canvas.toBlob((blob) => {
@@ -1641,7 +1825,7 @@ function saveJSON(key, val) {
       }, "image/png", 0.92);
     });
 
-    // Focus arena presets
+    // Focus presets
     $$("#screenFocusArena .seg-btn[data-focus-min]").forEach(btn => {
       btn.addEventListener("click", () => {
         if (Arena.running) return toast("Focus Arena", "Finish or stop the session to change duration.");
@@ -1655,7 +1839,7 @@ function saveJSON(key, val) {
     $("#stopArenaBtn").addEventListener("click", () => arenaStop("Stopped. The arena stays silent."));
 
     $("#copyShare3").addEventListener("click", () => {
-      const date = localDayKey();
+      const date = utcDayKey();
       const res = $("#shareArenaResult").textContent.trim();
       const dur = $("#shareArenaDur").textContent.trim();
       const badges = $("#shareArenaBadges").textContent.trim();
@@ -1670,7 +1854,7 @@ function saveJSON(key, val) {
     });
 
     $("#downloadShare3").addEventListener("click", () => {
-      const date = localDayKey();
+      const date = utcDayKey();
       const res = $("#shareArenaResult").textContent.trim();
       const dur = $("#shareArenaDur").textContent.trim();
       const badges = $("#shareArenaBadges").textContent.trim();
@@ -1678,12 +1862,8 @@ function saveJSON(key, val) {
       const canvas = drawShareCard({
         title: "Focus Arena",
         subtitle: `Day ${date} • Silent session`,
-        lines: [
-          `Result: ${res}`,
-          `Session: ${dur}`,
-          `Badges: ${badges}`
-        ],
-        footer: "Simulated presence • Local-only"
+        lines: [`Result: ${res}`, `Session: ${dur}`, `Badges: ${badges}`],
+        footer: "Simulated presence • Local-only (anon)"
       });
 
       canvas.toBlob((blob) => {
@@ -1692,22 +1872,19 @@ function saveJSON(key, val) {
       }, "image/png", 0.92);
     });
 
-    // Safety: reset modal close on Escape
+    // Escape close
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && !modalBackdrop.hidden) closeModal();
     });
   }
 
   // -----------------------------
-  // Initial mode state setup
+  // Defaults
   // -----------------------------
   function initDefaults() {
-    // Boss default duration based on active button (25m)
     bossSetDuration(25);
-    // Arena default duration 25m
     arenaSetDuration(25);
 
-    // init share dates already in renderHub
     $("#shareBossTask").textContent = "—";
     $("#shareBossDur").textContent = "—";
     $("#shareArenaResult").textContent = "—";
@@ -1721,6 +1898,7 @@ function saveJSON(key, val) {
   async function boot() {
     initTheme();
     initSupabase();
+
     reconcileStreakForNewDay();
 
     initVisibilityWatcher();
@@ -1733,14 +1911,11 @@ function saveJSON(key, val) {
     initArenaCanvas();
     renderArenaBadges();
 
-    // home first
     showScreen("#screenHome");
 
-    // Entry gate (must pick Anonymous or Login/Register)
     await ensureEntryGate();
   }
 
-  // Start after DOM is ready
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => { boot(); });
   } else {
@@ -1748,4 +1923,3 @@ function saveJSON(key, val) {
   }
 
 })();
-
