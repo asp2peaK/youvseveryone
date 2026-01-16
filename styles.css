@@ -127,50 +127,6 @@ body{
   padding: 10px 14px 80px;
 }
 
-/* Gate (first visit) */
-.gate{
-  min-height: calc(100vh - 120px);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding: 10px 0;
-}
-.gate-card{
-  width: min(520px, 100%);
-  padding: 18px;
-}
-.gate-kicker{
-  color: var(--faint);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.gate-title{
-  margin: 10px 0 8px;
-  font-size: clamp(30px, 6vw, 40px);
-  line-height: 1.05;
-  letter-spacing: -0.04em;
-}
-.gate-sub{
-  margin: 0 0 14px;
-  color: var(--muted);
-  line-height: 1.45;
-}
-.gate-actions{
-  display:flex;
-  gap: 10px;
-  flex-wrap:wrap;
-}
-.gate-foot{
-  margin-top: 12px;
-  display:flex;
-  justify-content:space-between;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--faint);
-}
-
 .screen{ display:none; }
 .screen.active{ display:block; animation: screenIn .22s ease both; }
 @keyframes screenIn{
@@ -690,6 +646,17 @@ body{
 .modal-title{ font-weight: 900; font-size: 16px; letter-spacing:-0.02em; }
 .modal-body{ margin-top: 10px; color: var(--muted); line-height:1.5; }
 .modal-actions{ margin-top: 14px; display:flex; justify-content:flex-end; gap: 10px; flex-wrap:wrap; }
+
+/* small inline link (used inside auth modal) */
+.link-inline{
+  display:inline-block;
+  margin-top: 10px;
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+  user-select:none;
+}
+.link-inline:hover{ color: var(--text); text-decoration: underline; }
 
 .toast-wrap{
   position: fixed;
