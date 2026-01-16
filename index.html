@@ -32,29 +32,8 @@
   </header>
 
   <main class="shell">
-    <!-- GATE (first visit) -->
-    <section class="screen active" id="screenGate" aria-labelledby="gateTitle">
-      <div class="gate">
-        <div class="card gate-card">
-          <div class="gate-kicker">Entry</div>
-          <h1 id="gateTitle" class="gate-title">You vs Everyone</h1>
-          <p class="gate-sub">No tracking. No spam. Pick how you want to start.</p>
-
-          <div class="gate-actions">
-            <button class="btn primary" type="button" id="gateAnonBtn">Continue anonymously</button>
-            <button class="btn" type="button" id="gateRegBtn">Create account</button>
-          </div>
-
-          <div class="gate-foot">
-            <span class="muted">Anonymous progress stays on this device.</span>
-            <span class="muted">Accounts sync later.</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- HOME / HUB -->
-    <section class="screen" id="screenHome" aria-labelledby="homeTitle">
+    <section class="screen active" id="screenHome" aria-labelledby="homeTitle">
       <div class="hero">
         <div class="hero-left">
           <h1 id="homeTitle" class="hero-title">You vs Everyone</h1>
@@ -476,6 +455,8 @@
   <!-- TOAST -->
   <div class="toast-wrap" aria-live="polite" aria-atomic="true" id="toastWrap"></div>
 
+  <!-- Supabase JS (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./app.js"></script>
 </body>
 </html>
