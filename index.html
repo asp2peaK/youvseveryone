@@ -24,6 +24,11 @@
         <span id="statusText">Loading…</span>
       </div>
 
+      <button class="pill" id="accountPill" type="button" aria-label="Account menu" title="Account">
+        <span class="avatar-dot" id="accountDot" aria-hidden="true"></span>
+        <span class="label" id="accountName">Anonymous</span>
+      </button>
+
       <button class="pill" id="themeToggle" type="button" aria-label="Toggle theme">
         <span class="icon" aria-hidden="true">☾</span>
         <span class="label">Theme</span>
@@ -455,8 +460,6 @@
   <!-- TOAST -->
   <div class="toast-wrap" aria-live="polite" aria-atomic="true" id="toastWrap"></div>
 
-  <!-- Supabase JS (CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./app.js"></script>
 </body>
 </html>
