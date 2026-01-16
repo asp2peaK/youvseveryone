@@ -220,7 +220,7 @@ function saveJSON(key, val) {
   // IMPORTANT:
   // - Use ONLY publishable/anon keys in the browser.
   // - RLS policies must protect your tables.
-  const SUPABASE_URL = "https://caehrwokvrdjlojnwnfzb.supabase.co";
+  const SUPABASE_URL = "https://caehrwokvdjlojnwnfzb.supabase.co";
   const SUPABASE_KEY = "sb_publishable_tl7q_CylF_YFH0Vu0D-2qg_flzagSsL";
 
   let supabase = null;
