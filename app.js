@@ -365,6 +365,7 @@ function saveJSON(key, val) {
 
       toast("Logged in", "Presence can be real now.");
       setUserMode("auth");
+      closeModalForce();
       await ensureProfileOrOnboard(data.user);
     }
 
