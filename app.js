@@ -331,7 +331,13 @@ function saveJSON(key, val) {
       if (!email || password.length < 6) return setAuthError("Enter a valid email and a 6+ char password.");
 
       setAuthError("");
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: "https://asp2peak.github.io/youvseveryone/"
+      }
+    });
       if (error) return setAuthError(error.message);
 
       // If email confirmations are enabled, session may be null.
