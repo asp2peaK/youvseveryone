@@ -110,6 +110,15 @@ body{
 .pill.subtle{ background: transparent; box-shadow:none; }
 .pill .icon{ opacity:.85; }
 .pill .label{ font-weight:600; }
+.avatar-dot{
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+}
+.pill#accountPill{ gap: 10px; }
 .pill:hover{ transform: translateY(-1px); transition: transform .18s ease; }
 .pill:active{ transform: translateY(0px); }
 
@@ -646,17 +655,6 @@ body{
 .modal-title{ font-weight: 900; font-size: 16px; letter-spacing:-0.02em; }
 .modal-body{ margin-top: 10px; color: var(--muted); line-height:1.5; }
 .modal-actions{ margin-top: 14px; display:flex; justify-content:flex-end; gap: 10px; flex-wrap:wrap; }
-
-/* small inline link (used inside auth modal) */
-.link-inline{
-  display:inline-block;
-  margin-top: 10px;
-  color: var(--muted);
-  font-weight: 700;
-  cursor: pointer;
-  user-select:none;
-}
-.link-inline:hover{ color: var(--text); text-decoration: underline; }
 
 .toast-wrap{
   position: fixed;
