@@ -1525,6 +1525,16 @@ function saveJSON(key, val) {
       .replaceAll("'", "&#039;");
   }
 
+  function escapeAttr(str) {
+  // безопасно для value="..."
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
   // -----------------------------
   // Wire up buttons + inputs
   // -----------------------------
