@@ -80,7 +80,7 @@
   // -----------------------------
   const LS = {
     theme: "yve_theme",
-    userMode: "yve_user_mode", // "anon" | "register_pending"
+    userMode: "yve_user_mode", // 'anon' | 'auth'
     streak: "yve_streak",
     lastStreakDay: "yve_streak_last_day",
     todayState: "yve_today_state", // for 24h challenge: {dayKey, state, startedAt, awayAccum, resultAt, challengeId, shareLast}
@@ -88,6 +88,16 @@
     arenaHistory: "yve_arena_history",
     arenaBadges: "yve_arena_badges" // integer
   };
+
+  // -----------------------------
+  // Supabase (Auth + DB)
+  // -----------------------------
+  // NOTE: Publishable keys are safe in-browser only with RLS enabled.
+  const SUPABASE_URL = "https://caehrwokvrdjlojnwnfzb.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_tl7q_CylF_YFH0Vu0D-2qg_flzagSsL";
+  const supabase = (window.supabase && window.supabase.createClient)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+    : null;
 
   function loadJSON(key, fallback) {
     try {
@@ -97,15 +107,6 @@
   }
   function saveJSON(key, val) {
     localStorage.setItem(key, JSON.stringify(val));
-  }
-
-  function getUserMode() {
-    const v = localStorage.getItem(LS.userMode);
-    return v === "anon" || v === "register_pending" ? v : null;
-  }
-  function setUserMode(v) {
-    if (!v) localStorage.removeItem(LS.userMode);
-    else localStorage.setItem(LS.userMode, v);
   }
 
   // -----------------------------
@@ -148,7 +149,11 @@
   const modalActions = $("#modalActions");
   const modalClose = $("#modalClose");
 
-  function openModal({ title, body, actions }) {
+  // If true, modal cannot be dismissed via X / backdrop / ESC.
+  let modalLocked = false;
+
+  function openModal({ title, body, actions, locked = false }) {
+    modalLocked = !!locked;
     modalTitle.textContent = title;
     modalBody.innerHTML = body; // body is controlled content; keep simple
     modalActions.innerHTML = "";
@@ -163,10 +168,20 @@
       modalActions.appendChild(btn);
     });
     modalBackdrop.hidden = false;
+
+    // Hide the X button when modal is locked.
+    modalClose.style.display = modalLocked ? "none" : "";
   }
 
   function closeModal() {
+    if (modalLocked) return;
     modalBackdrop.hidden = true;
+  }
+
+  function closeModalForce() {
+    modalLocked = false;
+    modalBackdrop.hidden = true;
+    modalClose.style.display = "";
   }
 
   modalClose.addEventListener("click", closeModal);
@@ -196,6 +211,267 @@
       applyTheme(next);
       toast("Theme", next === "dark" ? "Dark mode. Serious business." : "Light mode. Still serious.");
     });
+  }
+
+  // -----------------------------
+  // Supabase (Auth + DB)
+  // -----------------------------
+  // IMPORTANT:
+  // - Use ONLY publishable/anon keys in the browser.
+  // - RLS policies must protect your tables.
+  const SUPABASE_URL = "https://caehrwokvrdjlojnwnfzb.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_tl7q_CylF_YFH0Vu0D-2qg_flzagSsL";
+
+  let supabase = null;
+
+  function initSupabase() {
+    if (!window.supabase || !window.supabase.createClient) {
+      console.warn("Supabase JS not found. Auth will be unavailable.");
+      return;
+    }
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  }
+
+  async function getSupabaseUser() {
+    if (!supabase) return null;
+    const { data, error } = await supabase.auth.getUser();
+    if (error) return null;
+    return data.user || null;
+  }
+
+  function getUserMode() {
+    return localStorage.getItem(LS.userMode); // 'anon' | 'auth' | null
+  }
+  function setUserMode(mode) {
+    localStorage.setItem(LS.userMode, mode);
+  }
+
+  // -----------------------------
+  // Entry gate + Auth modals (cannot be dismissed)
+  // -----------------------------
+  function openEntryGateModal() {
+    openModal({
+      title: "Choose your entry",
+      locked: true,
+      body: `
+        <p><b>Pick a mode.</b> Anonymous stays local & simulated. Login enables real presence.</p>
+      `,
+      actions: [
+        {
+          label: "Continue anonymously",
+          variant: "ghost",
+          onClick: () => {
+            setUserMode("anon");
+            closeModalForce();
+            toast("Anonymous", "Simulated crowd. Nothing leaves your device.");
+            renderHub();
+          }
+        },
+        {
+          label: "Log in / Register",
+          variant: "primary",
+          onClick: () => {
+            openAuthModal({ mode: "login" });
+          }
+        }
+      ]
+    });
+  }
+
+  function openAuthModal({ mode, presetEmail = "" }) {
+    const isRegister = mode === "register";
+    const title = isRegister ? "Create account" : "Log in";
+
+    openModal({
+      title,
+      locked: true,
+      body: `
+        <div class="field" style="margin-top:0">
+          <span class="field-label">Email</span>
+          <input class="input" id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${escapeAttr(presetEmail)}" />
+        </div>
+        <div class="field">
+          <span class="field-label">Password</span>
+          <input class="input" id="authPass" type="password" autocomplete="current-password" placeholder="••••••••" />
+        </div>
+        <div id="authError" style="margin-top:10px;color:var(--danger);font-weight:700"></div>
+        <div class="link-inline" id="authToggle">${isRegister ? "Already have an account? Log in" : "First time here? Register"}</div>
+      `,
+      actions: [
+        {
+          label: "Back",
+          variant: "ghost",
+          onClick: () => openEntryGateModal()
+        },
+        {
+          label: isRegister ? "Create account" : "Log in",
+          variant: "primary",
+          onClick: () => (isRegister ? doRegister() : doLogin())
+        }
+      ]
+    });
+
+    // Wire toggle
+    const toggle = $("#authToggle");
+    toggle.addEventListener("click", () => {
+      const email = ($("#authEmail").value || "").trim();
+      openAuthModal({ mode: isRegister ? "login" : "register", presetEmail: email });
+    });
+
+    // Enter to submit
+    $("#authPass").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") (isRegister ? doRegister() : doLogin());
+    });
+
+    async function doRegister() {
+      if (!supabase) return setAuthError("Supabase not loaded.");
+      const email = ($("#authEmail").value || "").trim();
+      const password = $("#authPass").value || "";
+      if (!email || password.length < 6) return setAuthError("Enter a valid email and a 6+ char password.");
+
+      setAuthError("");
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) return setAuthError(error.message);
+
+      // If email confirmations are enabled, session may be null.
+      if (!data.session) {
+        toast("Registered", "Check your email to confirm, then log in.");
+        openAuthModal({ mode: "login", presetEmail: email });
+        return;
+      }
+
+      // Logged in immediately
+      toast("Registered", "Account created. One more step.");
+      setUserMode("auth");
+      await ensureProfileOrOnboard(data.user);
+    }
+
+    async function doLogin() {
+      if (!supabase) return setAuthError("Supabase not loaded.");
+      const email = ($("#authEmail").value || "").trim();
+      const password = $("#authPass").value || "";
+      if (!email || !password) return setAuthError("Enter email + password.");
+
+      setAuthError("");
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) return setAuthError(error.message);
+
+      toast("Logged in", "Presence can be real now.");
+      setUserMode("auth");
+      await ensureProfileOrOnboard(data.user);
+    }
+
+    function setAuthError(msg) {
+      const el = $("#authError");
+      if (el) el.textContent = msg;
+    }
+  }
+
+  async function ensureProfileOrOnboard(user) {
+    if (!supabase || !user) return;
+
+    // Try to fetch profile; if missing -> force onboarding modal.
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, display_name, color_hex")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      toast("Profile", "Could not load profile. Check RLS/policies.");
+      console.error(error);
+      return;
+    }
+
+    if (!data) {
+      openProfileModal(user);
+      return;
+    }
+
+    // Profile exists -> enter app
+    closeModalForce();
+    renderHub();
+  }
+
+  function openProfileModal(user) {
+    const COLORS = [
+      "#8dd9ff", "#b2ffcc", "#ffd36b", "#ff6b6b",
+      "#a98dff", "#ff8de1", "#7affff", "#7aff8d",
+      "#ffb36b", "#6b8dff", "#c0c0c0", "#ffffff"
+    ];
+
+    let chosen = COLORS[0];
+
+    openModal({
+      title: "Finish setup",
+      locked: true,
+      body: `
+        <p><b>Choose a display name</b> and your circle color. (12 free colors for now.)</p>
+
+        <div class="field">
+          <span class="field-label">Display name</span>
+          <input class="input" id="profileName" maxlength="24" placeholder="e.g., Nadir" />
+        </div>
+
+        <div class="field">
+          <span class="field-label">Circle color</span>
+          <div class="seg" id="colorSeg">
+            ${COLORS.map((c, i) => `
+              <button class="seg-btn ${i === 0 ? "active" : ""}" type="button" data-color="${c}" style="padding:10px 12px;">
+                <span style="display:inline-block;width:14px;height:14px;border-radius:999px;background:${c};border:1px solid var(--border)"></span>
+              </button>
+            `).join("")}
+          </div>
+        </div>
+
+        <div id="profileError" style="margin-top:10px;color:var(--danger);font-weight:700"></div>
+      `,
+      actions: [
+        {
+          label: "Save",
+          variant: "primary",
+          onClick: () => saveProfile()
+        }
+      ]
+    });
+
+    // Color selection
+    $$("#colorSeg .seg-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        $$("#colorSeg .seg-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        chosen = btn.getAttribute("data-color");
+      });
+    });
+
+    $("#profileName").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") saveProfile();
+    });
+
+    async function saveProfile() {
+      const name = ($("#profileName").value || "").trim();
+      if (!name) return setProfileError("Pick a display name.");
+      setProfileError("");
+
+      const payload = { id: user.id, display_name: name, color_hex: chosen };
+      const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+      if (error) {
+        // Common case: unique violation on display_name
+        if (String(error.message || "").toLowerCase().includes("duplicate") || String(error.code) === "23505") {
+          return setProfileError("This display name is taken. Try another.");
+        }
+        return setProfileError(error.message);
+      }
+
+      toast("Welcome", "Profile saved.");
+      closeModalForce();
+      renderHub();
+    }
+
+    function setProfileError(msg) {
+      const el = $("#profileError");
+      if (el) el.textContent = msg;
+    }
   }
 
   // -----------------------------
@@ -1195,12 +1471,8 @@
         if (Arena.running) arenaStop("Paused (left the arena).");
         // Note: 24h challenge stays in progress if you go home (same tab).
         // The rule is tab-leave, not screen navigation.
-        if (!getUserMode()) {
-          showScreen("#screenGate");
-        } else {
-          showScreen("#screenHome");
-          renderHub();
-        }
+        showScreen("#screenHome");
+        renderHub();
       });
     });
 
@@ -1208,12 +1480,8 @@
     $("#goHome").addEventListener("click", () => {
       if (Boss.running) bossStop("Paused (left the fight).");
       if (Arena.running) arenaStop("Paused (left the arena).");
-      if (!getUserMode()) {
-        showScreen("#screenGate");
-      } else {
-        showScreen("#screenHome");
-        renderHub();
-      }
+      showScreen("#screenHome");
+      renderHub();
     });
     $("#goHome").addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -1239,42 +1507,6 @@
   // Wire up buttons + inputs
   // -----------------------------
   function initActions() {
-    // Gate (first visit)
-    const anonBtn = $("#gateAnonBtn");
-    const regBtn = $("#gateRegBtn");
-    if (anonBtn) {
-      anonBtn.addEventListener("click", () => {
-        setUserMode("anon");
-        toast("Welcome", "Anonymous mode. Local-only progress.");
-        showScreen("#screenHome");
-        renderHub();
-      });
-    }
-    if (regBtn) {
-      regBtn.addEventListener("click", () => {
-        setUserMode("register_pending");
-        openModal({
-          title: "Create account",
-          body: `
-            <p><b>Accounts are the next step.</b></p>
-            <p>For now: this just marks that you want registration later. Your progress is still local-only.</p>
-          `,
-          actions: [
-            { label: "Not now", variant: "ghost", onClick: () => closeModal() },
-            {
-              label: "Continue",
-              variant: "primary",
-              onClick: () => {
-                closeModal();
-                showScreen("#screenHome");
-                renderHub();
-              }
-            }
-          ]
-        });
-      });
-    }
-
     // 24h challenge
     $("#joinChallengeBtn").addEventListener("click", joinChallenge);
     $("#completeChallengeBtn").addEventListener("click", completeChallenge);
@@ -1447,8 +1679,9 @@
   // -----------------------------
   // Boot
   // -----------------------------
-  function boot() {
+  async function boot() {
     initTheme();
+    initSupabase();
     reconcileStreakForNewDay();
 
     initVisibilityWatcher();
@@ -1461,17 +1694,16 @@
     initArenaCanvas();
     renderArenaBadges();
 
-    // first screen: gate until user chooses anon/registration
-    if (!getUserMode()) {
-      showScreen("#screenGate");
-    } else {
-      showScreen("#screenHome");
-    }
+    // home first
+    showScreen("#screenHome");
+
+    // Entry gate (must pick Anonymous or Login/Register)
+    await ensureEntryGate();
   }
 
   // Start after DOM is ready
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot);
+    document.addEventListener("DOMContentLoaded", () => { boot(); });
   } else {
     boot();
   }
